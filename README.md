@@ -101,14 +101,17 @@ needConfirm > working > thinking > done > idle
 
 The classic problem: Claude calls `AskUserQuestion`, the dashboard briefly flashes "awaiting input", then `PostToolUse` fires *immediately* (because the tool returned), the state gets overwritten to `thinking`, and you missed the alert.
 
-`update.sh` v1.3 fixes this:
+`update.sh` v1.4 fixes this:
 
-> While a session's state is `needConfirm`, only a `UserPromptSubmit` hook
-> (i.e. you actually replying) can clear it. Other hooks that try to overwrite
-> the state with `thinking` / `working` / `done` get coerced back to
-> `needConfirm`.
+> While a session's state is `needConfirm`:
+> - A `UserPromptSubmit` hook (you actually replying) clears it.
+> - Other hooks within 2 minutes of the last needConfirm trigger get coerced
+>   back to `needConfirm` (prevents `PostToolUse` from instantly overwriting
+>   it when the `AskUserQuestion` tool returns).
+> - After 2 minutes with no fresh needConfirm trigger, sticky is released so
+>   a stale "awaiting input" session can be cleaned up naturally.
 
-The overlay stays visible until you reply.
+The overlay stays visible until you reply — but won't leak across abandoned sessions.
 
 ---
 

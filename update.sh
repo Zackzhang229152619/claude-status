@@ -1,23 +1,26 @@
 #!/bin/bash
-# claude-status update hook V1.3 — per-session state with priority merge + sticky needConfirm
+# claude-status update hook V1.4 — sticky needConfirm with 2-minute timeout
 #
 # Usage: echo '<hook-json>' | update.sh <state>
 #   state: idle / thinking / working / needConfirm / done
 #
-# Sticky needConfirm rule (V1.3):
-#   When the current session is in needConfirm, only a UserPromptSubmit hook
-#   (i.e. the user actually replying) can clear it. Other hooks
-#   (PostToolUse / Stop / etc.) that try to write thinking / working / done
-#   are coerced back to needConfirm, so the "awaiting input" overlay stays
-#   visible until the user replies.
+# Sticky needConfirm rule (V1.4):
+#   While a session is in needConfirm:
+#     - UserPromptSubmit (the user actually replying) clears it.
+#     - Other hooks within 2 minutes of the last needConfirm trigger get
+#       coerced back to needConfirm (prevents PostToolUse from instantly
+#       overwriting it the moment AskUserQuestion returns).
+#     - After 2 minutes with no fresh needConfirm trigger, sticky is released
+#       so a stale "awaiting input" session can naturally be cleaned up.
 
+ORIG_STATE="$1"
 STATE="${1:-idle}"
 STATUS_FILE="$HOME/.claude/status/current.json"
 LOCK_DIR="$HOME/.claude/status/.lock"
 JQ=/usr/bin/jq
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-# 从 stdin 读 hook JSON
+# Read hook JSON from stdin
 HOOK_INPUT=""
 if ! [ -t 0 ]; then
     HOOK_INPUT=$(cat)
@@ -29,10 +32,10 @@ HOOK_EVENT=$(echo "$HOOK_INPUT" | $JQ -r '.hook_event_name // ""' 2>/dev/null ||
 if [[ -n "$CWD" ]]; then
     PROJECT=$(basename "$CWD")
 else
-    PROJECT="未知"
+    PROJECT="unknown"
 fi
 
-# mkdir 原子锁
+# Atomic mkdir lock
 WAITED=0
 while ! mkdir "$LOCK_DIR" 2>/dev/null; do
     sleep 0.1
@@ -44,41 +47,54 @@ while ! mkdir "$LOCK_DIR" 2>/dev/null; do
 done
 trap "rmdir '$LOCK_DIR' 2>/dev/null" EXIT
 
-# 读现有状态文件
+# Read existing state file
 if [[ -f "$STATUS_FILE" ]]; then
     CURRENT=$(cat "$STATUS_FILE")
 else
     CURRENT='{"global_state":"idle","sessions":[],"updated_at":""}'
 fi
 
-# V1.3 sticky needConfirm logic
-# Find this session's current state
+# V1.4 sticky needConfirm with 2-minute timeout
+# Find this session's current state + needConfirm_ts (last time a needConfirm hook fired)
 CURRENT_STATE=$(echo "$CURRENT" | $JQ -r --arg sid "$SESSION_ID" '.sessions[]? | select(.id == $sid) | .state' 2>/dev/null || echo "")
+CURRENT_NC_TS=$(echo "$CURRENT" | $JQ -r --arg sid "$SESSION_ID" '.sessions[]? | select(.id == $sid) | .needConfirm_ts // ""' 2>/dev/null || echo "")
 
-# If currently needConfirm:
-#   - Only UserPromptSubmit (user reply) can clear it (let STATE through)
-#   - Re-asserting needConfirm is also fine
-#   - All other hooks that try to overwrite get coerced back to needConfirm
+# needConfirm 2-minute timeout cutoff
+NC_CUTOFF=$(date -u -v-2M +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+# Sticky: currently needConfirm + new state isn't needConfirm + hook isn't UserPromptSubmit
+# + needConfirm is within the 2-minute window → coerce back to needConfirm
 if [[ "$CURRENT_STATE" == "needConfirm" ]] \
    && [[ "$STATE" != "needConfirm" ]] \
-   && [[ "$HOOK_EVENT" != "UserPromptSubmit" ]]; then
+   && [[ "$HOOK_EVENT" != "UserPromptSubmit" ]] \
+   && [[ -n "$CURRENT_NC_TS" ]] \
+   && [[ "$CURRENT_NC_TS" > "$NC_CUTOFF" ]]; then
     STATE="needConfirm"
 fi
 
-# 5 分钟前的时间戳
+# Compute new needConfirm_ts: refresh only when the original hook actually wrote
+# needConfirm; otherwise carry the old ts forward (sticky must not refresh it)
+if [[ "$ORIG_STATE" == "needConfirm" ]]; then
+    NEW_NC_TS="$TIMESTAMP"
+else
+    NEW_NC_TS="$CURRENT_NC_TS"
+fi
+
+# 5-minute cleanup cutoff for stale sessions
 CUTOFF=$(date -u -v-5M +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-# 更新 sessions 数组：移除该 session 旧条目 + 清理 5 分钟前的 + 添加新条目
+# Update sessions array: remove this session's old entry, cleanup 5-min-old entries, append new
 UPDATED=$(echo "$CURRENT" | $JQ \
     --arg sid "$SESSION_ID" \
     --arg state "$STATE" \
     --arg ts "$TIMESTAMP" \
     --arg proj "$PROJECT" \
     --arg cutoff "$CUTOFF" \
+    --arg nc_ts "$NEW_NC_TS" \
     '.sessions = (.sessions // [] | map(select(.id != $sid)) | map(select(.updated_at >= $cutoff)))
-     | .sessions += [{"id": $sid, "state": $state, "project": $proj, "updated_at": $ts}]')
+     | .sessions += [{"id": $sid, "state": $state, "project": $proj, "updated_at": $ts, "needConfirm_ts": $nc_ts}]')
 
-# 算 global_state（优先级最高的状态）
+# Compute global_state (highest-priority state across all sessions)
 PRIORITY=$(echo "$UPDATED" | $JQ -r '
     .sessions | map(.state) |
     if contains(["needConfirm"]) then "needConfirm"

@@ -102,13 +102,16 @@ needConfirm > working > thinking > done > idle
 
 经典痛点：Claude 调 `AskUserQuestion`，看板闪一下"等你拍板"，然后 `PostToolUse` 立刻触发（工具返回了），状态被覆盖成 `thinking`——你刚看一眼告警就消失了。
 
-`update.sh` v1.3 修复了这个：
+`update.sh` v1.4 修复了这个：
 
-> 当某 session 状态是 `needConfirm` 时，**只有 `UserPromptSubmit` hook**
-> （你真正回复消息时触发）能清除。其他 hook 触发的 `thinking` / `working` /
-> `done` 都被强制覆盖回 `needConfirm`。
+> 当某 session 状态是 `needConfirm` 时：
+> - `UserPromptSubmit` hook（你真正回复时触发）能清除。
+> - 距离最后一次 needConfirm 触发 **2 分钟内**，其他 hook 都被强制覆盖回
+>   `needConfirm`（防止 `PostToolUse` 在 `AskUserQuestion` 工具返回瞬间覆盖）。
+> - 超过 2 分钟没新 needConfirm 触发，放开 sticky，让废弃的"等你拍板"
+>   session 能被自然 cleanup。
 
-覆盖层一直在直到你回复。
+覆盖层一直在直到你回复——同时不会因为废弃 session 永久卡住。
 
 ---
 
