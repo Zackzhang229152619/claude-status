@@ -1,15 +1,17 @@
 #!/bin/bash
-# claude-status update hook V1.4 — sticky needConfirm with 2-minute timeout
+# claude-status update hook V1.4.1 — sticky needConfirm with 2-minute timeout
 #
 # Usage: echo '<hook-json>' | update.sh <state>
 #   state: idle / thinking / working / needConfirm / done
 #
-# Sticky needConfirm rule (V1.4):
+# Sticky needConfirm rule (V1.4.1):
 #   While a session is in needConfirm:
-#     - UserPromptSubmit (the user actually replying) clears it.
+#     - The user "answering" (UserPromptSubmit, OR PostToolUse on
+#       AskUserQuestion — which is how AskUserQuestion answers actually fire)
+#       clears the needConfirm state.
 #     - Other hooks within 2 minutes of the last needConfirm trigger get
-#       coerced back to needConfirm (prevents PostToolUse from instantly
-#       overwriting it the moment AskUserQuestion returns).
+#       coerced back to needConfirm (prevents PostToolUse on unrelated tools
+#       from instantly overwriting it).
 #     - After 2 minutes with no fresh needConfirm trigger, sticky is released
 #       so a stale "awaiting input" session can naturally be cleaned up.
 
@@ -29,6 +31,17 @@ fi
 SESSION_ID=$(echo "$HOOK_INPUT" | $JQ -r '.session_id // "default"' 2>/dev/null || echo "default")
 CWD=$(echo "$HOOK_INPUT" | $JQ -r '.cwd // ""' 2>/dev/null || echo "")
 HOOK_EVENT=$(echo "$HOOK_INPUT" | $JQ -r '.hook_event_name // ""' 2>/dev/null || echo "")
+TOOL_NAME=$(echo "$HOOK_INPUT" | $JQ -r '.tool_name // ""' 2>/dev/null || echo "")
+
+# "User has answered" signal — either UserPromptSubmit OR PostToolUse on AskUserQuestion
+# (AskUserQuestion answers don't fire UserPromptSubmit; they fire PostToolUse with tool_name=AskUserQuestion)
+USER_ANSWERED="no"
+if [[ "$HOOK_EVENT" == "UserPromptSubmit" ]]; then
+    USER_ANSWERED="yes"
+elif [[ "$HOOK_EVENT" == "PostToolUse" ]] && [[ "$TOOL_NAME" == "AskUserQuestion" ]]; then
+    USER_ANSWERED="yes"
+fi
+
 if [[ -n "$CWD" ]]; then
     PROJECT=$(basename "$CWD")
 else
@@ -54,7 +67,7 @@ else
     CURRENT='{"global_state":"idle","sessions":[],"updated_at":""}'
 fi
 
-# V1.4 sticky needConfirm with 2-minute timeout
+# V1.4.1 sticky needConfirm with 2-minute timeout
 # Find this session's current state + needConfirm_ts (last time a needConfirm hook fired)
 CURRENT_STATE=$(echo "$CURRENT" | $JQ -r --arg sid "$SESSION_ID" '.sessions[]? | select(.id == $sid) | .state' 2>/dev/null || echo "")
 CURRENT_NC_TS=$(echo "$CURRENT" | $JQ -r --arg sid "$SESSION_ID" '.sessions[]? | select(.id == $sid) | .needConfirm_ts // ""' 2>/dev/null || echo "")
@@ -62,11 +75,11 @@ CURRENT_NC_TS=$(echo "$CURRENT" | $JQ -r --arg sid "$SESSION_ID" '.sessions[]? |
 # needConfirm 2-minute timeout cutoff
 NC_CUTOFF=$(date -u -v-2M +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-# Sticky: currently needConfirm + new state isn't needConfirm + hook isn't UserPromptSubmit
+# Sticky: currently needConfirm + new state isn't needConfirm + user hasn't answered
 # + needConfirm is within the 2-minute window → coerce back to needConfirm
 if [[ "$CURRENT_STATE" == "needConfirm" ]] \
    && [[ "$STATE" != "needConfirm" ]] \
-   && [[ "$HOOK_EVENT" != "UserPromptSubmit" ]] \
+   && [[ "$USER_ANSWERED" == "no" ]] \
    && [[ -n "$CURRENT_NC_TS" ]] \
    && [[ "$CURRENT_NC_TS" > "$NC_CUTOFF" ]]; then
     STATE="needConfirm"
