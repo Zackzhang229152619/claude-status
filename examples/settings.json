@@ -1,0 +1,67 @@
+{
+  "_comment": "Add these hooks to your Claude Code settings.json (~/.claude/settings.json). The status server reads stdin JSON from each hook to track session state.",
+
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash $HOME/.claude/status/update.sh working"
+          }
+        ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash $HOME/.claude/status/update.sh needConfirm"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash $HOME/.claude/status/update.sh thinking"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash $HOME/.claude/status/update.sh thinking"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash $HOME/.claude/status/update.sh needConfirm"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash $HOME/.claude/status/update.sh done"
+          }
+        ]
+      }
+    ]
+  }
+}

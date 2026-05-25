@@ -1,0 +1,31 @@
+# Runtime state files - don't commit
+current.json
+sessions_detail.json
+token_stats.json
+*.log
+.lock/
+
+# Backups
+backups/
+*.bak
+*.bak_*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Personal credentials / secrets (never commit)
+_TENCENT_PASSWORD.txt
+*.password
+*.secret
+.env

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Status Dashboard — 7 个美术方向</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #0c0e15; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", sans-serif; }
+  .dc-frame {
+    width: 100%; height: 100%;
+    border: 0;
+    background: #181b22;
+    border-radius: 4px;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel">
+  const { DesignCanvas, DCSection, DCArtboard } = window;
+
+  const LAND_W = 1180, LAND_H = 820;
+  const PORT_W = 820,  PORT_H = 1180;
+  const PHONE_LAND_W = 932, PHONE_LAND_H = 430;
+  const PHONE_PORT_W = 430, PHONE_PORT_H = 932;
+  const MAC_W = 1920, MAC_H = 1080;
+
+  const VARIANTS = [
+    { id: 'jarvis', name: 'Iron Man',  tag: 'JARVIS HUD',     desc: '战衣 HUD · 弧反应堆 · 数据雨 · 警报扫线' },
+    { id: 'stage',  name: 'Live Stage', tag: '演出现场',       desc: '聚光灯 + 激光 + 迪斯科球 + 调音台 + 彩带' },
+    { id: 'aurora', name: 'Aurora',    tag: '极光环境屏',     desc: '漂浮渐变极光 + 玻璃卡片 + 衬线字' },
+    { id: 'press',  name: 'Press',     tag: '编辑部大屏',     desc: 'Split-flap 时钟 + Bulletin 排版' },
+    { id: 'glass',  name: 'Glass',     tag: '玻璃浮层',       desc: 'VisionOS · 透视层 + specular 扫光' },
+    { id: 'garden', name: 'Garden',    tag: '信息花园',       desc: 'SVG 植物生长 + token 河流 canvas' },
+    { id: 'lab',    name: 'Lab',       tag: '实验台',         desc: '培养皿样本 + 3 根试管液位' }
+  ];
+
+  const STATES = [
+    { id: 'working',     label: 'Working · 多 session 工作中' },
+    { id: 'thinking',    label: 'Thinking · 思考中' },
+    { id: 'done',        label: 'Done · 全部完成' },
+    { id: 'idle',        label: 'Idle · 静止' },
+    { id: 'needConfirm', label: 'Need Confirm · 全屏接管' },
+    { id: 'empty',       label: 'Empty · 无 session' },
+    { id: 'error',       label: 'Error · 连接失败' }
+  ];
+
+  function Frame({ variant, demo, w, h }) {
+    return (
+      <iframe
+        className="dc-frame"
+        src={`variants/${variant}.html?demo=${demo}`}
+        width={w} height={h}
+        title={`${variant} ${demo}`}
+        loading="lazy"
+      />
+    );
+  }
+
+  function App() {
+    return (
+      <DesignCanvas
+        title="Claude Status — 7 个美术方向"
+        subtitle="① 主气质对比 · ② 全屏 NEED CONFIRM · ③ 响应式尺寸验证 · ④ 每个方向的全状态"
+      >
+        <DCSection
+          id="overview"
+          title="① 7 个方向 · Working 状态"
+          subtitle="iPad 横屏 1180×820 · 主气质对比"
+        >
+          {VARIANTS.map(v => (
+            <DCArtboard
+              key={v.id}
+              id={`ov-${v.id}`}
+              label={`${v.name} · ${v.tag} — ${v.desc}`}
+              width={LAND_W}
+              height={LAND_H}
+            >
+              <Frame variant={v.id} demo="working" w={LAND_W} h={LAND_H} />
+            </DCArtboard>
+          ))}
+        </DCSection>
+
+        <DCSection
+          id="needconfirm"
+          title="② 7 个方向 · NEED CONFIRM 全屏接管"
+          subtitle="戏剧性时刻 — 看哪个方向的『等你拍板』接管最舒服"
+        >
+          {VARIANTS.map(v => (
+            <DCArtboard
+              key={v.id}
+              id={`nc-${v.id}`}
+              label={`${v.name} · needConfirm`}
+              width={LAND_W}
+              height={LAND_H}
+            >
+              <Frame variant={v.id} demo="needConfirm" w={LAND_W} h={LAND_H} />
+            </DCArtboard>
+          ))}
+        </DCSection>
+
+        <DCSection
+          id="responsive"
+          title="③ 响应式尺寸验证（JARVIS / Stage 两个最复杂的方向）"
+          subtitle="iPhone 横竖 · iPad 横竖 · Mac 1920 — 同一份 HTML 自适应"
+        >
+          <DCArtboard id="rs-mac"      label="Mac / 外接屏 · 1920×1080" width={MAC_W} height={MAC_H}>
+            <Frame variant="jarvis" demo="working" w={MAC_W} h={MAC_H} />
+          </DCArtboard>
+          <DCArtboard id="rs-ipad-l"   label="iPad 横屏 · 1180×820"     width={LAND_W} height={LAND_H}>
+            <Frame variant="stage" demo="working" w={LAND_W} h={LAND_H} />
+          </DCArtboard>
+          <DCArtboard id="rs-ipad-p"   label="iPad 竖屏 · 820×1180"     width={PORT_W} height={PORT_H}>
+            <Frame variant="jarvis" demo="working" w={PORT_W} h={PORT_H} />
+          </DCArtboard>
+          <DCArtboard id="rs-iphone-l" label="iPhone 横屏 · 932×430"    width={PHONE_LAND_W} height={PHONE_LAND_H}>
+            <Frame variant="stage" demo="working" w={PHONE_LAND_W} h={PHONE_LAND_H} />
+          </DCArtboard>
+          <DCArtboard id="rs-iphone-p" label="iPhone 竖屏 · 430×932"    width={PHONE_PORT_W} height={PHONE_PORT_H}>
+            <Frame variant="jarvis" demo="working" w={PHONE_PORT_W} h={PHONE_PORT_H} />
+          </DCArtboard>
+        </DCSection>
+
+        {VARIANTS.map(v => (
+          <DCSection
+            key={v.id}
+            id={`detail-${v.id}`}
+            title={`④ ${v.name} · 所有状态`}
+            subtitle={v.desc}
+          >
+            {STATES.map(s => (
+              <DCArtboard
+                key={`${v.id}-${s.id}`}
+                id={`${v.id}-${s.id}`}
+                label={s.label}
+                width={LAND_W}
+                height={LAND_H}
+              >
+                <Frame variant={v.id} demo={s.id} w={LAND_W} h={LAND_H} />
+              </DCArtboard>
+            ))}
+          </DCSection>
+        ))}
+
+      </DesignCanvas>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

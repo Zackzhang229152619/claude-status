@@ -1,0 +1,1219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Status · Live Stage</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Unbounded:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-0:    #07041a;
+  --bg-1:    #110628;
+  --neon-1:  #ff3ec0;   /* hot pink */
+  --neon-2:  #6c33ff;   /* purple */
+  --neon-3:  #00e0ff;   /* cyan */
+  --neon-4:  #ffeb3b;   /* yellow */
+  --neon-5:  #ff5a3a;   /* orange red */
+
+  --fg:      #ffeefb;
+  --fg-2:    #d6c4e8;
+  --fg-3:    #9a87b3;
+  --fg-4:    #5a4b70;
+
+  --c-working:  var(--neon-4);
+  --c-thinking: var(--neon-3);
+  --c-done:     #5cf78a;
+  --c-idle:     #735a8c;
+  --c-confirm:  var(--neon-1);
+
+  --font-display: "Unbounded", "Helvetica Neue", sans-serif;
+  --font-bebas:   "Bebas Neue", "Impact", sans-serif;
+  --font-mono:    "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --font-sans:    -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  width: 100%; height: 100%;
+  background: var(--bg-0);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================================================
+   Layer 0 — stage backdrop
+   ============================================================ */
+.backdrop {
+  position: fixed; inset: 0;
+  background:
+    radial-gradient(ellipse 90% 70% at 50% 100%, oklch(0.20 0.20 320) 0%, transparent 60%),
+    radial-gradient(ellipse 80% 60% at 30% 0%,   oklch(0.25 0.20 280) 0%, transparent 55%),
+    radial-gradient(ellipse 80% 60% at 80% 0%,   oklch(0.30 0.20 200) 0%, transparent 55%),
+    linear-gradient(180deg, #06031a 0%, #0d041d 50%, #170638 100%);
+  z-index: 0;
+}
+
+/* fog/haze layer */
+.fog {
+  position: fixed; inset: -10%;
+  background:
+    radial-gradient(circle at 30% 40%, oklch(0.40 0.15 320 / 0.35), transparent 30%),
+    radial-gradient(circle at 70% 60%, oklch(0.45 0.15 280 / 0.35), transparent 30%),
+    radial-gradient(circle at 50% 80%, oklch(0.40 0.15 200 / 0.30), transparent 35%);
+  filter: blur(60px);
+  z-index: 0;
+  animation: fog-drift 18s ease-in-out infinite alternate;
+}
+@keyframes fog-drift {
+  from { transform: translate(0,0) scale(1); }
+  to   { transform: translate(-4%, 2%) scale(1.05); }
+}
+
+/* moving spotlights */
+.spots {
+  position: fixed; inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+}
+.spot {
+  position: absolute;
+  top: -10vh;
+  width: 0;
+  height: 0;
+  border-left: 50vw solid transparent;
+  border-right: 50vw solid transparent;
+  border-top: 130vh solid var(--c, white);
+  filter: blur(40px);
+  opacity: 0.25;
+  transform-origin: 50% 0%;
+  mix-blend-mode: screen;
+  animation: spot-sweep var(--d, 14s) ease-in-out infinite alternate;
+}
+@keyframes spot-sweep {
+  0%   { transform: translateX(-30vw) rotate(-25deg); }
+  100% { transform: translateX( 30vw) rotate( 25deg); }
+}
+.spot.s1 { --c: oklch(0.65 0.27 340); --d: 12s; left: 10%; }
+.spot.s2 { --c: oklch(0.70 0.25 240); --d: 16s; left: 50%; animation-direction: alternate-reverse; animation-delay: -3s; }
+.spot.s3 { --c: oklch(0.72 0.24 190); --d: 19s; left: 80%; animation-delay: -8s; }
+
+/* laser beams */
+.lasers {
+  position: fixed; inset: 0;
+  z-index: 1; pointer-events: none;
+  overflow: hidden;
+}
+.laser {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 200vmax;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--c, var(--neon-1)) 30%, var(--c, var(--neon-1)) 70%, transparent);
+  transform-origin: 50% 50%;
+  opacity: 0.5;
+  box-shadow: 0 0 8px var(--c, var(--neon-1));
+  animation: laser-sweep var(--d, 8s) ease-in-out infinite;
+}
+@keyframes laser-sweep {
+  0%, 100% { transform: translate(-50%, -50%) rotate(-15deg); opacity: 0.2; }
+  50%      { transform: translate(-50%, -50%) rotate( 15deg); opacity: 0.7; }
+}
+.laser.l1 { --c: var(--neon-1); --d: 7s; }
+.laser.l2 { --c: var(--neon-3); --d: 9s; animation-delay: -2s; }
+.laser.l3 { --c: var(--neon-4); --d: 11s; animation-delay: -4s; }
+
+/* dust particles */
+.dust {
+  position: fixed; inset: 0;
+  z-index: 2; pointer-events: none;
+}
+.dust-mote {
+  position: absolute;
+  width: 2px; height: 2px;
+  background: white;
+  border-radius: 50%;
+  opacity: 0.5;
+  box-shadow: 0 0 6px white;
+  animation: dust-float linear infinite;
+}
+@keyframes dust-float {
+  from { transform: translateY(110vh) translateX(0); }
+  to   { transform: translateY(-15vh) translateX(50px); }
+}
+
+/* ============================================================
+   Stage
+   ============================================================ */
+#stage {
+  position: relative; z-index: 5;
+  width: 100%; height: 100%;
+  padding: clamp(20px, 2.4vw, 36px);
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: clamp(14px, 1.6vw, 24px);
+  transition: opacity 0.5s, filter 0.5s;
+}
+#stage.hidden { opacity: 0.18; filter: blur(3px); pointer-events: none; }
+
+/* ============================================================
+   Top — marquee + clock
+   ============================================================ */
+.top-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: clamp(14px, 1.5vw, 24px);
+  align-items: center;
+}
+
+/* Vinyl disc */
+.vinyl {
+  position: relative;
+  width: clamp(50px, 6vw, 80px);
+  height: clamp(50px, 6vw, 80px);
+  flex-shrink: 0;
+  animation: spin 4s linear infinite;
+}
+.vinyl-disc {
+  width: 100%; height: 100%;
+  border-radius: 50%;
+  background:
+    repeating-radial-gradient(circle at center,
+      #1a0a2a 0px, #1a0a2a 2px,
+      #2a1538 2px, #2a1538 4px);
+  position: relative;
+  box-shadow: inset 0 0 8px rgba(255,255,255,0.06), 0 4px 20px rgba(0,0,0,0.6);
+}
+.vinyl-disc::before {
+  content: '';
+  position: absolute;
+  inset: 38%;
+  border-radius: 50%;
+  background: var(--neon-1);
+  box-shadow: 0 0 12px var(--neon-1);
+}
+.vinyl-disc::after {
+  content: '';
+  position: absolute;
+  inset: 47%;
+  border-radius: 50%;
+  background: #15041e;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* marquee */
+.marquee-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.now-playing {
+  font-family: var(--font-display);
+  font-size: clamp(11px, 1vw, 13px);
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  color: var(--neon-1);
+  text-transform: uppercase;
+  text-shadow: 0 0 12px var(--neon-1);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.np-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--neon-1);
+  box-shadow: 0 0 8px var(--neon-1);
+  animation: pulse-d 0.8s ease-in-out infinite;
+}
+@keyframes pulse-d {
+  0%,100% { transform: scale(1); }
+  50%     { transform: scale(1.4); }
+}
+
+.marquee {
+  font-family: var(--font-bebas);
+  font-size: clamp(22px, 2.6vw, 36px);
+  line-height: 1;
+  color: var(--fg);
+  letter-spacing: 0.05em;
+  overflow: hidden;
+  text-shadow: 0 0 24px rgba(255,62,192,0.4);
+  white-space: nowrap;
+  min-width: 0;
+}
+.marquee-inner {
+  display: inline-block;
+  white-space: nowrap;
+  animation: marquee-scroll 28s linear infinite;
+  padding-right: 60px;
+}
+.marquee-inner span { color: var(--neon-3); padding: 0 8px; }
+@keyframes marquee-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+.clock-pane {
+  position: relative;
+  display: flex; flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 8px 18px;
+  background: linear-gradient(135deg, oklch(0.25 0.20 320 / 0.4), oklch(0.20 0.15 280 / 0.3));
+  border-radius: 12px;
+  border: 1px solid oklch(0.60 0.20 320 / 0.4);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 24px oklch(0.50 0.25 320 / 0.25);
+}
+.clock {
+  font-family: var(--font-display);
+  font-size: clamp(22px, 2.6vw, 34px);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  background: linear-gradient(180deg, var(--neon-3), var(--neon-1));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 12px rgba(255,62,192,0.5));
+}
+.clock .colon { animation: blink 1s ease-in-out infinite; }
+@keyframes blink { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+.clock-meta {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--fg-3);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+/* ============================================================
+   Equalizer banner — token usage
+   ============================================================ */
+.eq-banner {
+  position: relative;
+  padding: clamp(12px, 1.2vw, 18px);
+  background: linear-gradient(180deg, oklch(0.18 0.10 290 / 0.5), oklch(0.12 0.08 280 / 0.4));
+  border: 1px solid oklch(0.50 0.20 320 / 0.30);
+  border-radius: 14px;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: clamp(12px, 1.4vw, 24px);
+  box-shadow: 0 8px 28px oklch(0.30 0.25 320 / 0.18);
+}
+.eq-banner::before {
+  content: 'TOKEN MIXER · LIVE';
+  position: absolute;
+  top: -10px; left: 16px;
+  background: var(--bg-0);
+  padding: 0 8px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  color: var(--neon-3);
+  text-shadow: 0 0 8px var(--neon-3);
+}
+
+.eq-track {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+.eq-bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: stretch;
+  gap: 3px;
+  height: clamp(36px, 5vw, 56px);
+}
+.eq-bar {
+  flex: 1;
+  background: linear-gradient(180deg, var(--neon-1), var(--neon-2));
+  border-radius: 2px;
+  min-height: 10%;
+  animation: eq-jump var(--d, 0.4s) ease-in-out infinite alternate;
+  box-shadow: 0 0 6px var(--neon-1);
+}
+@keyframes eq-jump {
+  from { height: 15%; }
+  to   { height: 85%; }
+}
+.eq-track[data-scope="today"]  .eq-bar { background: linear-gradient(180deg, var(--neon-3), var(--neon-2)); box-shadow: 0 0 6px var(--neon-3); }
+.eq-track[data-scope="month"]  .eq-bar { background: linear-gradient(180deg, var(--neon-1), var(--neon-2)); box-shadow: 0 0 6px var(--neon-1); }
+.eq-track[data-scope="total"]  .eq-bar { background: linear-gradient(180deg, var(--neon-4), var(--neon-5)); box-shadow: 0 0 6px var(--neon-4); }
+
+.eq-info {
+  min-width: 0;
+  text-align: right;
+}
+.eq-scope {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: var(--neon-3);
+  text-transform: uppercase;
+}
+.eq-num {
+  font-family: var(--font-bebas);
+  font-size: clamp(22px, 2.4vw, 32px);
+  line-height: 1;
+  color: var(--fg);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.eq-num.out { color: var(--neon-4); }
+.eq-row {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-3);
+  letter-spacing: 0.08em;
+}
+.eq-out-cap { color: var(--neon-4); }
+.eq-hit { color: #5cf78a; }
+
+/* ============================================================
+   Stage / Setlist body
+   ============================================================ */
+.body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(260px, 1fr);
+  gap: clamp(14px, 1.5vw, 24px);
+  min-height: 0;
+}
+body[data-orient="portrait"] .body,
+body[data-size="phone"] .body {
+  grid-template-columns: 1fr;
+  grid-template-rows: minmax(0, 1.5fr) auto;
+}
+
+/* Set list pane */
+.setlist {
+  position: relative;
+  padding: clamp(14px, 1.4vw, 20px);
+  background:
+    linear-gradient(180deg, rgba(20,8,40,0.5), rgba(15,4,28,0.4));
+  border: 1px solid oklch(0.40 0.20 320 / 0.30);
+  border-radius: 14px;
+  display: flex; flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.setlist-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px dashed oklch(0.50 0.15 320 / 0.30);
+}
+.setlist-title {
+  font-family: var(--font-bebas);
+  font-size: clamp(22px, 2.4vw, 32px);
+  letter-spacing: 0.06em;
+  background: linear-gradient(90deg, var(--neon-1), var(--neon-3));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-transform: uppercase;
+}
+.setlist-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-3);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+.setlist-meta b { color: var(--neon-3); font-weight: 700; }
+
+.setlist-tracks {
+  flex: 1;
+  display: flex; flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding-right: 4px;
+  min-height: 0;
+}
+.setlist-tracks::-webkit-scrollbar { display: none; }
+
+/* Track row — a session */
+.track {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 14px;
+  padding: 10px 14px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-left: 3px solid var(--state-c, var(--c-idle));
+  border-radius: 10px;
+  align-items: center;
+  animation: none;
+  transition: background 0.3s, border-color 0.3s;
+}
+@keyframes track-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+.track.state-working     { --state-c: var(--c-working); }
+.track.state-thinking    { --state-c: var(--c-thinking); }
+.track.state-done        { --state-c: var(--c-done); }
+.track.state-idle        { --state-c: var(--c-idle); opacity: 0.6; }
+.track.state-needConfirm {
+  --state-c: var(--c-confirm);
+  background: oklch(0.30 0.20 320 / 0.20);
+  animation: none;
+}
+@keyframes track-flash {
+  0%,100% { box-shadow: 0 0 0 0 var(--c-confirm); }
+  50%     { box-shadow: 0 0 28px oklch(0.65 0.25 340 / 0.45); }
+}
+
+.track-no {
+  font-family: var(--font-bebas);
+  font-size: clamp(20px, 2vw, 28px);
+  color: var(--state-c);
+  width: 28px;
+  text-align: center;
+  letter-spacing: 0;
+  filter: drop-shadow(0 0 6px var(--state-c));
+}
+
+/* mini eq waveform */
+.track-wave {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 22px;
+  width: 30px;
+}
+.track-wave .b {
+  flex: 1;
+  background: var(--state-c);
+  border-radius: 1px;
+  min-height: 10%;
+  animation: none;
+  height: 50%;
+  box-shadow: 0 0 4px var(--state-c);
+}
+@keyframes eq-soft {
+  from { height: 45%; }
+  to   { height: 55%; }
+}
+.track.state-idle .track-wave .b { animation: none; height: 20%; opacity: 0.5; }
+.track.state-done .track-wave .b { animation: none; height: 60%; }
+
+.track-info {
+  min-width: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.track-name {
+  font-family: var(--font-display);
+  font-size: clamp(14px, 1.4vw, 18px);
+  font-weight: 700;
+  color: var(--fg);
+  letter-spacing: -0.005em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.track-sub {
+  font-family: var(--font-mono);
+  font-size: clamp(10px, 0.95vw, 12px);
+  color: var(--fg-2);
+  letter-spacing: 0.02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: flex; align-items: baseline; gap: 8px;
+}
+.track-tool {
+  color: var(--state-c);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+.track-tool::before { content: '♪ '; opacity: 0.7; }
+.track-target { color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.track-prompt {
+  font-style: italic;
+  color: var(--fg-3);
+  font-size: 11px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.track-prompt::before { content: '“'; color: var(--fg-4); }
+.track-prompt::after  { content: '”'; color: var(--fg-4); }
+
+.track-meta {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--fg-3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.track-meta .tag {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--state-c);
+  letter-spacing: 0.15em;
+  margin-bottom: 2px;
+}
+
+.empty-set {
+  flex: 1;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-bebas);
+  font-size: clamp(20px, 2vw, 28px);
+  color: var(--fg-3);
+  letter-spacing: 0.2em;
+  text-align: center;
+  opacity: 0.7;
+}
+.empty-set::after { content: ' ♪'; color: var(--neon-1); animation: pulse-d 1s ease-in-out infinite; }
+
+/* ============================================================
+   VU meter pane — current state breakdown
+   ============================================================ */
+.vu-pane {
+  position: relative;
+  padding: clamp(14px, 1.4vw, 20px);
+  background: linear-gradient(180deg, rgba(20,8,40,0.5), rgba(15,4,28,0.4));
+  border: 1px solid oklch(0.40 0.20 320 / 0.30);
+  border-radius: 14px;
+  display: flex; flex-direction: column;
+  gap: clamp(10px, 1vw, 16px);
+  min-height: 0;
+  overflow: hidden;
+}
+.vu-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed oklch(0.50 0.15 320 / 0.30);
+}
+.vu-title {
+  font-family: var(--font-bebas);
+  font-size: clamp(20px, 2vw, 26px);
+  letter-spacing: 0.06em;
+  background: linear-gradient(90deg, var(--neon-3), var(--neon-1));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-transform: uppercase;
+}
+.vu-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-3);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* Status mixer — channel rows */
+.mixer {
+  display: flex; flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.mixer::-webkit-scrollbar { display: none; }
+
+.ch {
+  display: grid;
+  grid-template-columns: 80px 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+.ch-name {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ch-c, var(--fg-2));
+  display: flex; align-items: center; gap: 6px;
+}
+.ch-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--ch-c, var(--fg-3));
+  box-shadow: 0 0 6px var(--ch-c, var(--fg-3));
+}
+.ch-fader {
+  height: 18px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.ch-level {
+  position: absolute;
+  inset: 0;
+  width: var(--lvl, 10%);
+  background: linear-gradient(90deg,
+    #5cf78a 0%, var(--neon-4) 60%, var(--neon-1) 85%, var(--neon-5) 100%);
+  transition: width 0.6s cubic-bezier(.4,.0,.2,1);
+}
+.ch-level::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(90deg, transparent 0 8px, rgba(0,0,0,0.4) 8px 9px);
+  pointer-events: none;
+}
+.ch-val {
+  font-family: var(--font-bebas);
+  font-size: 18px;
+  color: var(--fg);
+  letter-spacing: 0;
+  min-width: 32px;
+  text-align: right;
+}
+
+/* Disco ball indicator */
+.disco {
+  position: relative;
+  width: clamp(90px, 9vw, 130px);
+  height: clamp(90px, 9vw, 130px);
+  margin: auto;
+  align-self: center;
+  flex-shrink: 0;
+}
+.disco-ball {
+  width: 100%; height: 100%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 30% 30%, #fff 0%, transparent 30%),
+    repeating-conic-gradient(from 0deg,
+      #c5dfff 0deg 8deg, #6a99c8 8deg 16deg, #c5dfff 16deg 24deg, #8babc7 24deg 32deg);
+  box-shadow:
+    inset -6px -10px 16px rgba(0,0,0,0.4),
+    0 0 30px rgba(255,255,255,0.3),
+    0 0 60px rgba(110,180,255,0.3);
+  animation: spin 8s linear infinite;
+}
+.disco-sparkle {
+  position: absolute;
+  inset: -30%;
+  pointer-events: none;
+  z-index: -1;
+  background:
+    radial-gradient(circle 6px at 20% 10%, white, transparent),
+    radial-gradient(circle 4px at 80% 30%, white, transparent),
+    radial-gradient(circle 5px at 10% 80%, white, transparent),
+    radial-gradient(circle 4px at 90% 90%, white, transparent),
+    radial-gradient(circle 3px at 50% 5%, white, transparent),
+    radial-gradient(circle 4px at 60% 95%, white, transparent);
+  filter: blur(1px);
+  animation: sparkle 2s ease-in-out infinite alternate;
+  opacity: 0.5;
+}
+@keyframes sparkle {
+  0%   { opacity: 0.2; transform: scale(0.9); }
+  100% { opacity: 0.8; transform: scale(1.1); }
+}
+
+/* ============================================================
+   needConfirm — encore mode (curtain pulls back, big text)
+   ============================================================ */
+#confirm {
+  position: fixed; inset: 0;
+  z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 30%, oklch(0.45 0.28 340 / 0.7), transparent 65%),
+    radial-gradient(circle at 50% 80%, oklch(0.40 0.28 320 / 0.6), transparent 60%),
+    oklch(0.10 0.18 320);
+  transition: opacity 0.5s;
+  overflow: hidden;
+}
+#confirm.visible { opacity: 1; pointer-events: auto; }
+
+/* curtain side flaps */
+.curtain {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 12%;
+  background:
+    repeating-linear-gradient(90deg,
+      oklch(0.30 0.22 340) 0 8px,
+      oklch(0.20 0.18 340) 8px 16px,
+      oklch(0.35 0.22 340) 16px 24px);
+  box-shadow: inset 0 0 60px rgba(0,0,0,0.5);
+  transform: translateX(var(--tx, 0));
+  transition: transform 0.6s cubic-bezier(.4,.0,.2,1);
+}
+.curtain.left  { left: 0;   --tx: 0; }
+.curtain.right { right: 0;  --tx: 0; }
+#confirm.visible .curtain.left  { --tx: -2%; }
+#confirm.visible .curtain.right { --tx: 2%; }
+
+/* confetti */
+.confetti {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.confetti-piece {
+  position: absolute;
+  width: 8px; height: 12px;
+  background: var(--cc, var(--neon-1));
+  top: -20px;
+  animation: confetti-fall var(--d, 4s) linear infinite;
+  animation-delay: var(--dl, 0s);
+  transform-origin: 50% 50%;
+}
+@keyframes confetti-fall {
+  0%   { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(110vh) rotate(720deg); opacity: 0.6; }
+}
+
+.confirm-inner {
+  position: relative;
+  z-index: 2;
+  text-align: center;
+  padding: clamp(30px, 4vw, 60px);
+  max-width: 92vw;
+}
+.encore-tag {
+  display: inline-block;
+  padding: 8px 22px;
+  background: linear-gradient(90deg, var(--neon-3), var(--neon-1));
+  color: #000;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(11px, 1.2vw, 15px);
+  letter-spacing: 0.4em;
+  border-radius: 999px;
+  margin-bottom: clamp(20px, 3vw, 36px);
+  box-shadow:
+    0 0 30px rgba(255,62,192,0.5),
+    0 6px 24px rgba(0,0,0,0.4);
+  animation: encore-bob 1.5s ease-in-out infinite;
+}
+@keyframes encore-bob {
+  0%,100% { transform: translateY(0); }
+  50%     { transform: translateY(-6px); }
+}
+.confirm-text {
+  font-family: var(--font-bebas);
+  font-size: clamp(90px, 16vw, 260px);
+  line-height: 0.95;
+  letter-spacing: 0.02em;
+  background: linear-gradient(180deg, #fff 20%, var(--neon-1) 60%, var(--neon-2) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 8px 40px rgba(255,62,192,0.4);
+  margin-bottom: clamp(20px, 3vw, 32px);
+  filter: drop-shadow(0 4px 30px rgba(255,62,192,0.6));
+  animation: confirm-pulse 1.6s ease-in-out infinite;
+}
+@keyframes confirm-pulse {
+  0%,100% { transform: scale(1); filter: drop-shadow(0 4px 30px rgba(255,62,192,0.6)); }
+  50%     { transform: scale(1.02); filter: drop-shadow(0 8px 60px rgba(255,62,192,0.9)); }
+}
+
+.confirm-list {
+  display: flex; flex-direction: column; gap: 10px; align-items: center;
+}
+.confirm-row {
+  display: inline-flex; align-items: baseline; gap: 16px;
+  padding: 10px 24px;
+  border: 1px solid oklch(0.65 0.28 340 / 0.5);
+  background: oklch(0.25 0.18 320 / 0.5);
+  border-radius: 999px;
+  backdrop-filter: blur(12px);
+  animation: none;
+  box-shadow: 0 0 24px oklch(0.50 0.25 340 / 0.4);
+}
+@keyframes row-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+.confirm-name {
+  font-family: var(--font-display);
+  font-size: clamp(20px, 2.2vw, 28px);
+  font-weight: 700;
+  color: var(--fg);
+}
+.confirm-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--neon-3);
+  letter-spacing: 0.05em;
+}
+
+.confirm-clock {
+  position: absolute;
+  top: 30px; right: 36px;
+  z-index: 3;
+  font-family: var(--font-bebas);
+  font-size: clamp(22px, 2.4vw, 32px);
+  letter-spacing: 0.05em;
+  color: var(--neon-3);
+  text-shadow: 0 0 12px var(--neon-3);
+}
+
+/* error */
+#error-overlay {
+  position: fixed; inset: 0;
+  background: oklch(0.10 0.10 320 / 0.92);
+  backdrop-filter: blur(20px);
+  display: none;
+  flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 14px;
+  z-index: 80;
+}
+.err-title {
+  font-family: var(--font-bebas);
+  font-size: clamp(30px, 3vw, 44px);
+  color: var(--neon-1);
+  letter-spacing: 0.15em;
+  text-shadow: 0 0 18px var(--neon-1);
+}
+.err-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+body[data-size="phone"] .eq-banner { grid-template-columns: 1fr; gap: 10px; }
+body[data-size="phone"] .vinyl { width: 42px; height: 42px; }
+</style>
+</head>
+<body>
+
+<div class="backdrop"></div>
+<div class="fog"></div>
+
+<div class="lasers">
+  <div class="laser l1"></div>
+  <div class="laser l2"></div>
+  <div class="laser l3"></div>
+</div>
+
+<div class="spots">
+  <div class="spot s1"></div>
+  <div class="spot s2"></div>
+  <div class="spot s3"></div>
+</div>
+
+<div class="dust" id="dust"></div>
+
+<div id="stage">
+
+  <header class="top-row">
+    <div class="vinyl">
+      <div class="vinyl-disc"></div>
+    </div>
+    <div class="marquee-block">
+      <div class="now-playing"><span class="np-dot"></span>NOW PLAYING · LIVE FROM CLAUDE</div>
+      <div class="marquee">
+        <div class="marquee-inner" id="marquee">
+          <span id="marquee-text">CLAUDE · LIVE FROM SHANGHAI · MULTI-SESSION SET · GENERATIVE DESIGN ENCORE · </span>
+          <span id="marquee-text-2">CLAUDE · LIVE FROM SHANGHAI · MULTI-SESSION SET · GENERATIVE DESIGN ENCORE · </span>
+        </div>
+      </div>
+    </div>
+    <div class="clock-pane">
+      <div class="clock" id="clock"><span>00</span><span class="colon">:</span><span>00</span></div>
+      <div class="clock-meta" id="date">— —</div>
+    </div>
+  </header>
+
+  <section class="eq-banner">
+    <div class="eq-track" data-scope="today">
+      <div class="eq-bars" data-scope="today"></div>
+      <div class="eq-info">
+        <div class="eq-scope">今日 TODAY</div>
+        <div class="eq-num" id="t-today-in">—</div>
+        <div class="eq-row">↑<span class="eq-out-cap"> <span id="t-today-out">—</span> out</span> · <span class="eq-hit" id="hit-today">缓存 —</span></div>
+      </div>
+    </div>
+    <div class="eq-track" data-scope="month">
+      <div class="eq-bars" data-scope="month"></div>
+      <div class="eq-info">
+        <div class="eq-scope">本月 MONTH</div>
+        <div class="eq-num" id="t-month-in">—</div>
+        <div class="eq-row">↑<span class="eq-out-cap"> <span id="t-month-out">—</span> out</span> · <span class="eq-hit" id="hit-month">缓存 —</span></div>
+      </div>
+    </div>
+    <div class="eq-track" data-scope="total">
+      <div class="eq-bars" data-scope="total"></div>
+      <div class="eq-info">
+        <div class="eq-scope">累计 TOTAL</div>
+        <div class="eq-num" id="t-total-in">—</div>
+        <div class="eq-row">↑<span class="eq-out-cap"> <span id="t-total-out">—</span> out</span> · <span class="eq-hit" id="hit-total">命中 —</span></div>
+      </div>
+    </div>
+  </section>
+
+  <main class="body">
+
+    <section class="setlist">
+      <div class="setlist-head">
+        <div class="setlist-title">Tonight's Set ☆ 今晚歌单</div>
+        <div class="setlist-meta"><b id="sess-count">0</b> TRACKS · <span id="g-summary">SOUND CHECK</span></div>
+      </div>
+      <div class="setlist-tracks" id="sessions">
+        <div class="empty-set">SOUND CHECK</div>
+      </div>
+    </section>
+
+    <aside class="vu-pane">
+      <div class="vu-head">
+        <div class="vu-title">Mixer</div>
+        <div class="vu-meta" id="g-label-2">— —</div>
+      </div>
+      <div class="disco">
+        <div class="disco-sparkle"></div>
+        <div class="disco-ball"></div>
+      </div>
+      <div class="mixer" id="mixer">
+        <!-- Channels injected via JS -->
+      </div>
+    </aside>
+
+  </main>
+</div>
+
+<div id="confirm" aria-hidden="true">
+  <div class="curtain left"></div>
+  <div class="curtain right"></div>
+  <div class="confetti" id="confetti"></div>
+  <div class="confirm-clock" id="confirm-clock">--:--</div>
+  <div class="confirm-inner">
+    <div class="encore-tag">ENCORE · 等你拍板</div>
+    <div class="confirm-text">等你拍板</div>
+    <div class="confirm-list" id="confirm-list"></div>
+  </div>
+</div>
+
+<div id="error-overlay">
+  <div class="err-title">— SOUND SYSTEM DOWN —</div>
+  <div class="err-sub">CHECK WIFI · SERVER.PY</div>
+</div>
+
+<script src="_common.js"></script>
+<script>
+const C = window.StatusCommon;
+
+/* ============ Dust particles ============ */
+(function dust() {
+  const wrap = document.getElementById('dust');
+  for (let i = 0; i < 30; i++) {
+    const m = document.createElement('div');
+    m.className = 'dust-mote';
+    m.style.left = (Math.random() * 100) + '%';
+    m.style.animationDuration = (14 + Math.random() * 18) + 's';
+    m.style.animationDelay = -(Math.random() * 30) + 's';
+    m.style.opacity = (0.2 + Math.random() * 0.5);
+    m.style.transform = `scale(${0.5 + Math.random()})`;
+    wrap.appendChild(m);
+  }
+})();
+
+/* ============ Confetti for confirm ============ */
+(function confetti() {
+  const wrap = document.getElementById('confetti');
+  const colors = ['#ff3ec0', '#6c33ff', '#00e0ff', '#ffeb3b', '#ff5a3a'];
+  for (let i = 0; i < 70; i++) {
+    const p = document.createElement('div');
+    p.className = 'confetti-piece';
+    p.style.left = (Math.random() * 100) + '%';
+    p.style.setProperty('--cc', colors[Math.floor(Math.random() * colors.length)]);
+    p.style.setProperty('--d', (3 + Math.random() * 4) + 's');
+    p.style.setProperty('--dl', -(Math.random() * 7) + 's');
+    p.style.width = (4 + Math.random() * 6) + 'px';
+    p.style.height = (8 + Math.random() * 8) + 'px';
+    wrap.appendChild(p);
+  }
+})();
+
+/* ============ EQ bars for each scope ============ */
+function buildEqBars(scope, count) {
+  const wrap = document.querySelector(`.eq-bars[data-scope="${scope}"]`);
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  for (let i = 0; i < count; i++) {
+    const b = document.createElement('div');
+    b.className = 'eq-bar';
+    b.style.setProperty('--d', (0.35 + Math.random() * 0.35) + 's');
+    b.style.animationDelay = -(Math.random() * 0.6) + 's';
+    wrap.appendChild(b);
+  }
+}
+buildEqBars('today', 14);
+buildEqBars('month', 14);
+buildEqBars('total', 14);
+
+/* ============ Clock ============ */
+function tickClock() {
+  const now = new Date();
+  const hh = C.pad2(now.getHours()), mm = C.pad2(now.getMinutes()), ss = C.pad2(now.getSeconds());
+  document.getElementById('clock').innerHTML = `<span>${hh}</span><span class="colon">:</span><span>${mm}</span>`;
+  document.getElementById('date').textContent = C.fmtDate(now).toUpperCase();
+  document.getElementById('confirm-clock').textContent = hh + ':' + mm + ':' + ss;
+}
+tickClock();
+setInterval(tickClock, 1000);
+
+/* ============ Sessions / Setlist ============ */
+function renderSessions(sessions, detail) {
+  const panel = document.getElementById('sessions');
+  document.getElementById('sess-count').textContent = sessions.length;
+
+  if (!sessions.length) {
+    panel.innerHTML = '<div class="empty-set">SOUND CHECK</div>';
+    return;
+  }
+  const dmap = {};
+  (detail || []).forEach(d => { if (d.id) dmap[d.id] = d; });
+  const sorted = C.sortSessions(sessions);
+  const VIS = 6;
+  const visible = sorted.slice(0, VIS);
+  const extra = sorted.length - visible.length;
+
+  const tagFor = { working: 'LIVE', thinking: 'CUE', done: 'DONE', idle: 'OFF', needConfirm: 'CALL' };
+
+  panel.innerHTML = visible.map((s, i) => {
+    const d = dmap[s.id] || {};
+    const state = s.state || 'idle';
+    const project = d.project || s.project || '未知曲目';
+    const tool = d.current_tool, target = d.current_target, prompt = d.last_prompt;
+    const age = C.timeAgo(s.updated_at);
+
+    const subBits = [];
+    if (tool)    subBits.push(`<span class="track-tool">${C.esc(tool)}</span>`);
+    if (target)  subBits.push(`<span class="track-target">${C.esc(target)}</span>`);
+    const subLine = subBits.length ? `<div class="track-sub">${subBits.join('')}</div>` : '';
+    const promptLine = prompt ? `<div class="track-prompt">${C.esc(prompt)}</div>` : '';
+
+    return `
+      <div class="track state-${state}" style="animation-delay:${i*70}ms">
+        <div class="track-no">${String(i+1).padStart(2,'0')}</div>
+        <div class="track-wave"><div class="b"></div><div class="b"></div><div class="b"></div><div class="b"></div></div>
+        <div class="track-info">
+          <div class="track-name">${C.esc(project)}</div>
+          ${subLine}${promptLine}
+        </div>
+        <div class="track-meta">
+          <span class="tag">${tagFor[state] || state}</span>
+          <span>T+${age}</span>
+        </div>
+      </div>`;
+  }).join('') + (extra > 0 ? `<div class="empty-set" style="font-size:14px; opacity:0.6; padding:8px">+ ${extra} TRACKS IN QUEUE</div>` : '');
+}
+
+function renderTop(gs, sessions) {
+  const labelMap = {
+    working: 'LIVE NOW', thinking: 'CUING UP', done: 'WRAPPED',
+    idle: 'SOUND CHECK', needConfirm: 'STANDBY · ENCORE'
+  };
+  document.getElementById('g-label-2').textContent = labelMap[gs] || 'SOUND CHECK';
+  const counts = {};
+  sessions.forEach(s => { counts[s.state] = (counts[s.state] || 0) + 1; });
+  const total = sessions.length;
+  const order = ['working','thinking','needConfirm','done','idle'];
+  const parts = order.filter(k => counts[k]).map(k => `${counts[k]} ${k.toUpperCase()}`);
+  const summary = total === 0 ? 'WAITING FOR LIGHTS'
+    : (labelMap[gs] || 'LIVE NOW') + (parts.length ? ' · ' + parts.join(' · ') : '');
+  document.getElementById('g-summary').textContent = summary;
+
+  // mixer channels reflect state breakdown
+  renderMixer(sessions);
+}
+
+function renderMixer(sessions) {
+  const m = document.getElementById('mixer');
+  const counts = {};
+  sessions.forEach(s => { counts[s.state] = (counts[s.state] || 0) + 1; });
+  const total = sessions.length || 1;
+  const channels = [
+    { id: 'working',     name: 'WORKING',  color: 'var(--c-working)' },
+    { id: 'thinking',    name: 'THINKING', color: 'var(--c-thinking)' },
+    { id: 'done',        name: 'DONE',     color: 'var(--c-done)' },
+    { id: 'idle',        name: 'IDLE',     color: 'var(--c-idle)' },
+    { id: 'needConfirm', name: 'CONFIRM',  color: 'var(--c-confirm)' }
+  ];
+  m.innerHTML = channels.map(ch => {
+    const n = counts[ch.id] || 0;
+    const pct = total ? Math.max(8, Math.min(100, (n / total) * 100)) : 8;
+    return `
+      <div class="ch" style="--ch-c: ${ch.color}">
+        <div class="ch-name"><span class="ch-dot"></span>${ch.name}</div>
+        <div class="ch-fader"><div class="ch-level" style="--lvl: ${n ? pct : 5}%; opacity: ${n ? 1 : 0.3}"></div></div>
+        <div class="ch-val">${n}</div>
+      </div>`;
+  }).join('');
+}
+
+function renderConfirm(sessions) {
+  const list = sessions.filter(s => s.state === 'needConfirm');
+  document.getElementById('confirm-list').innerHTML = list.map((s, i) => `
+    <div class="confirm-row" style="animation-delay:${i*120}ms">
+      <span class="confirm-name">${C.esc(s.project || '未知曲目')}</span>
+      <span class="confirm-id">№ ${C.esc((s.id||'').slice(0,8))}</span>
+    </div>`).join('');
+}
+
+/* ============ Tokens ============ */
+function setNum(id, val) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const formatted = C.fmtTokens(val);
+  if (el.textContent === formatted) return;
+  el.style.transition = 'opacity .25s, transform .25s';
+  el.style.opacity = '0';
+  el.style.transform = 'translateY(-3px)';
+  setTimeout(() => { el.textContent = formatted; el.style.opacity = '1'; el.style.transform = 'none'; }, 230);
+}
+
+function renderTokens(data) {
+  if (!data) return;
+  const t = data.today || {}, m = data.month || {}, a = data.total || {};
+  setNum('t-today-in',  t.input);  setNum('t-today-out', t.output);
+  setNum('t-month-in',  m.input);  setNum('t-month-out', m.output);
+  setNum('t-total-in',  a.input);  setNum('t-total-out', a.output);
+  const th=C.hitRate(t),mh=C.hitRate(m),ah=C.hitRate(a);
+  document.getElementById('hit-today').textContent = th!==null?`缓存 ${th}%`:'缓存 —';
+  document.getElementById('hit-month').textContent = mh!==null?`缓存 ${mh}%`:'缓存 —';
+  document.getElementById('hit-total').textContent = ah!==null?`命中 ${ah}%`:'命中 —';
+}
+
+C.init({
+  onState(cur, detail) {
+    const gs = cur.global_state || 'idle';
+    const sessions = cur.sessions || [];
+    const isConfirm = gs === 'needConfirm';
+    document.getElementById('stage').classList.toggle('hidden', isConfirm);
+    document.getElementById('confirm').classList.toggle('visible', isConfirm);
+    renderTop(gs, sessions);
+    renderSessions(sessions, detail);
+    renderConfirm(sessions);
+    document.getElementById('error-overlay').style.display = 'none';
+  },
+  onTokens: renderTokens,
+  onError(isErr) {
+    document.getElementById('error-overlay').style.display = isErr ? 'flex' : 'none';
+  }
+});
+</script>
+</body>
+</html>

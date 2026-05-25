@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Status · Aurora</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-deep:    #07091a;
+  --fg:         #ecf0ff;
+  --fg-2:       #b9c0e0;
+  --fg-3:       #7a82a8;
+  --fg-4:       #565d80;
+
+  --c-working:  oklch(0.78 0.16 70);
+  --c-thinking: oklch(0.80 0.14 220);
+  --c-done:     oklch(0.80 0.16 150);
+  --c-idle:     oklch(0.65 0.06 285);
+  --c-confirm:  oklch(0.70 0.22 25);
+
+  --font-serif: "Instrument Serif", "Times New Roman", serif;
+  --font-mono:  "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  width: 100%; height: 100%;
+  background: var(--bg-deep);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================================================
+   AURORA BG — three giant soft gradient blobs that drift
+   ============================================================ */
+.aurora {
+  position: fixed; inset: -20%;
+  z-index: 0;
+  pointer-events: none;
+  filter: blur(80px) saturate(140%);
+  opacity: 0.85;
+  transition: filter 1.6s ease;
+}
+.aurora-blob {
+  position: absolute;
+  border-radius: 50%;
+  mix-blend-mode: screen;
+  will-change: transform;
+}
+.blob-a { width: 60vmax; height: 60vmax; left: -10%;  top: -20%;
+          background: radial-gradient(circle, oklch(0.55 0.20 270) 0%, transparent 60%);
+          animation: drift-a 38s ease-in-out infinite; }
+.blob-b { width: 70vmax; height: 70vmax; right: -15%; top: 10%;
+          background: radial-gradient(circle, oklch(0.60 0.18 200) 0%, transparent 60%);
+          animation: drift-b 52s ease-in-out infinite; }
+.blob-c { width: 55vmax; height: 55vmax; left: 20%; bottom: -25%;
+          background: radial-gradient(circle, oklch(0.50 0.22 320) 0%, transparent 60%);
+          animation: drift-c 44s ease-in-out infinite; }
+.blob-d { width: 40vmax; height: 40vmax; right: 30%; top: 40%;
+          background: radial-gradient(circle, oklch(0.65 0.20 160) 0%, transparent 60%);
+          animation: drift-d 60s ease-in-out infinite; opacity: 0.6; }
+
+@keyframes drift-a {
+  0%,100% { transform: translate(0,0) scale(1); }
+  33%     { transform: translate(15vmin, 10vmin) scale(1.1); }
+  66%     { transform: translate(-10vmin, 20vmin) scale(0.95); }
+}
+@keyframes drift-b {
+  0%,100% { transform: translate(0,0) scale(1); }
+  50%     { transform: translate(-20vmin, 15vmin) scale(1.15); }
+}
+@keyframes drift-c {
+  0%,100% { transform: translate(0,0) scale(0.95); }
+  40%     { transform: translate(20vmin, -15vmin) scale(1.1); }
+  80%     { transform: translate(-12vmin, -25vmin) scale(1); }
+}
+@keyframes drift-d {
+  0%,100% { transform: translate(0,0) scale(1); }
+  50%     { transform: translate(-25vmin, -20vmin) scale(1.2); }
+}
+
+/* state-tinted overlay over aurora */
+.aurora-state {
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 1.4s ease, background 1.4s ease;
+  mix-blend-mode: soft-light;
+}
+body[data-state="working"]     .aurora-state { background: radial-gradient(circle at 30% 70%, oklch(0.75 0.20 70 / 0.5), transparent 60%); opacity: 1; }
+body[data-state="thinking"]    .aurora-state { background: radial-gradient(circle at 70% 30%, oklch(0.75 0.18 220 / 0.5), transparent 60%); opacity: 1; }
+body[data-state="done"]        .aurora-state { background: radial-gradient(circle at 50% 50%, oklch(0.75 0.18 150 / 0.4), transparent 60%); opacity: 1; }
+body[data-state="needConfirm"] .aurora-state { background: radial-gradient(circle at 50% 50%, oklch(0.70 0.30 25  / 0.85), transparent 70%); opacity: 1; }
+
+/* film grain */
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/></filter><rect width='200' height='200' filter='url(%23n)' opacity='0.55'/></svg>");
+  opacity: 0.07;
+  mix-blend-mode: overlay;
+}
+
+/* ============================================================
+   Layout
+   ============================================================ */
+#stage {
+  position: relative; z-index: 5;
+  width: 100%; height: 100%;
+  padding: clamp(22px, 2.6vw, 40px);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: clamp(20px, 2vw, 32px);
+  transition: opacity 0.5s;
+}
+#stage.hidden { opacity: 0; pointer-events: none; }
+
+/* TOP — clock + status eyebrow */
+header.top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--gap);
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: oklch(0.18 0.04 270 / 0.5);
+  border: 1px solid oklch(0.80 0.04 270 / 0.18);
+  backdrop-filter: blur(20px) saturate(150%);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.15em;
+  color: var(--fg-2);
+  text-transform: uppercase;
+}
+.dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--c-idle);
+}
+.dot-working     { background: var(--c-working);  box-shadow: 0 0 0 4px oklch(0.78 0.16 70 / 0.22), 0 0 18px oklch(0.78 0.16 70 / 0.6); animation: none; }
+.dot-thinking    { background: var(--c-thinking); box-shadow: 0 0 0 4px oklch(0.80 0.14 220 / 0.22), 0 0 18px oklch(0.80 0.14 220 / 0.6); animation: none; }
+.dot-done        { background: var(--c-done);     box-shadow: 0 0 0 4px oklch(0.80 0.16 150 / 0.20), 0 0 14px oklch(0.80 0.16 150 / 0.5); }
+.dot-idle        { background: var(--c-idle);     box-shadow: none; opacity: 0.6; }
+.dot-needConfirm { background: var(--c-confirm);  box-shadow: 0 0 0 4px oklch(0.70 0.22 25 / 0.35), 0 0 24px oklch(0.70 0.22 25 / 0.8); animation: none; }
+
+@keyframes breathe {
+  0%,100% { transform: scale(1);    filter: brightness(1); }
+  50%     { transform: scale(1.25); filter: brightness(1.3); }
+}
+
+.clock-cluster {
+  text-align: right;
+  font-family: var(--font-serif);
+  line-height: 1;
+}
+.clock {
+  font-size: clamp(48px, 7vw, 96px);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  text-shadow: 0 4px 40px oklch(0.6 0.15 270 / 0.5);
+}
+.clock .colon { opacity: 0.5; animation: blink 2s ease-in-out infinite; }
+@keyframes blink { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+.date {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: clamp(11px, 1vw, 14px);
+  letter-spacing: 0.12em;
+  color: var(--fg-3);
+  text-transform: uppercase;
+}
+
+/* BODY — sessions left / token right */
+main.body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr);
+  gap: clamp(20px, 2vw, 32px);
+  min-height: 0;
+}
+
+@media (orientation: portrait), (max-width: 820px) {
+  main.body { grid-template-columns: 1fr; grid-template-rows: auto auto; }
+  .sessions-col, .tokens-col { min-height: 0; }
+  .sessions { flex: 0 0 auto; overflow: visible; }
+  .card { flex-shrink: 0; }
+}
+
+/* Section heading */
+.section-h {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: clamp(12px, 1.2vw, 18px);
+}
+.section-title {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: clamp(22px, 2.4vw, 32px);
+  color: var(--fg);
+  letter-spacing: -0.01em;
+}
+.section-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  letter-spacing: 0.1em;
+}
+
+/* sessions column */
+.sessions-col { display: flex; flex-direction: column; min-height: 0; }
+.sessions {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(10px, 1vw, 16px);
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding-right: 6px;
+  min-height: 0;
+}
+.sessions::-webkit-scrollbar { display: none; }
+
+/* ───── glass session card ───── */
+.card {
+  position: relative;
+  padding: clamp(14px, 1.4vw, 20px) clamp(16px, 1.6vw, 22px);
+  border-radius: 20px;
+  background: oklch(0.20 0.04 270 / 0.42);
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  border: 1px solid oklch(0.85 0.03 270 / 0.10);
+  overflow: hidden;
+  animation: none;
+  transition: transform 0.4s, border-color 0.6s;
+}
+.card::before { /* inner glow / top highlight */
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(135deg, oklch(1 0 0 / 0.10) 0%, transparent 35%),
+    radial-gradient(120% 80% at 0% 0%, oklch(1 0 0 / 0.08), transparent 50%);
+}
+.card::after { /* state hue veil */
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 1s;
+}
+.card.state-working::after     { opacity: 1; background: linear-gradient(135deg, oklch(0.78 0.16 70 / 0.15), transparent 70%); }
+.card.state-thinking::after    { opacity: 1; background: linear-gradient(135deg, oklch(0.80 0.14 220 / 0.15), transparent 70%); }
+.card.state-done::after        { opacity: 1; background: linear-gradient(135deg, oklch(0.80 0.16 150 / 0.10), transparent 70%); }
+.card.state-needConfirm::after { opacity: 1; background: linear-gradient(135deg, oklch(0.70 0.22 25 / 0.22), transparent 70%); animation: confirm-veil 1.4s ease-in-out infinite; }
+@keyframes confirm-veil { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+
+.card.state-working     { border-color: oklch(0.78 0.16 70 / 0.30); }
+.card.state-thinking    { border-color: oklch(0.80 0.14 220 / 0.30); }
+.card.state-done        { border-color: oklch(0.80 0.16 150 / 0.25); }
+.card.state-needConfirm { border-color: oklch(0.70 0.22 25 / 0.50); }
+.card.state-idle        { opacity: 0.62; }
+
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+.card-row1 {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 6px;
+}
+.card-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid;
+  flex-shrink: 0;
+}
+.badge-working     { color: var(--c-working);  border-color: oklch(0.78 0.16 70 / 0.45);  background: oklch(0.78 0.16 70 / 0.10); }
+.badge-thinking    { color: var(--c-thinking); border-color: oklch(0.80 0.14 220 / 0.45); background: oklch(0.80 0.14 220 / 0.10); }
+.badge-done        { color: var(--c-done);     border-color: oklch(0.80 0.16 150 / 0.45); background: oklch(0.80 0.16 150 / 0.10); }
+.badge-needConfirm { color: oklch(0.92 0.10 25); border-color: oklch(0.70 0.22 25 / 0.60); background: oklch(0.70 0.22 25 / 0.18); }
+.badge-idle        { color: var(--fg-3);       border-color: oklch(0.40 0.02 270 / 0.5);  background: transparent; }
+
+.card-project {
+  font-family: var(--font-serif);
+  font-size: clamp(18px, 1.7vw, 26px);
+  color: var(--fg);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+.card-id {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-4);
+  letter-spacing: 0.05em;
+}
+.card-age {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-4);
+}
+
+.card-tool {
+  font-family: var(--font-mono);
+  font-size: clamp(11px, 1vw, 14px);
+  color: var(--fg-2);
+  display: flex; align-items: baseline; gap: 8px;
+  margin-top: 2px;
+  margin-bottom: 6px;
+}
+.card-tool-name {
+  color: oklch(0.85 0.10 220);
+  font-weight: 500;
+}
+.card-tool-name::before { content: '→ '; color: var(--fg-4); margin-right: 2px; }
+.card-tool-target {
+  color: var(--fg-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.card-prompt {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: clamp(13px, 1.2vw, 17px);
+  color: var(--fg-2);
+  line-height: 1.45;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  opacity: 0.85;
+}
+.card-prompt::before { content: '“'; color: var(--fg-4); }
+.card-prompt::after  { content: '”'; color: var(--fg-4); }
+
+.placeholder {
+  flex: 1;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: clamp(18px, 1.8vw, 24px);
+  color: var(--fg-3);
+  opacity: 0.7;
+  border-radius: 20px;
+  background: oklch(0.15 0.04 270 / 0.25);
+  backdrop-filter: blur(16px);
+  border: 1px dashed oklch(0.85 0.03 270 / 0.10);
+  min-height: 100px;
+}
+
+.more {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-4);
+  letter-spacing: 0.1em;
+  padding-top: 6px;
+}
+
+/* ───── token panel ───── */
+.token-col {
+  display: flex; flex-direction: column; min-height: 0;
+}
+.token-stack {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(10px, 1vw, 14px);
+  min-height: 0;
+}
+.tok {
+  position: relative;
+  flex: 1;
+  padding: clamp(14px, 1.4vw, 20px);
+  border-radius: 18px;
+  background: oklch(0.20 0.04 270 / 0.42);
+  backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid oklch(0.85 0.03 270 / 0.10);
+  overflow: hidden;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.tok::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(135deg, oklch(1 0 0 / 0.08), transparent 40%);
+  pointer-events: none; border-radius: inherit;
+}
+.tok-h {
+  display: flex; align-items: baseline; justify-content: space-between;
+}
+.tok-scope {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: clamp(15px, 1.4vw, 19px);
+  color: var(--fg);
+}
+.tok-hit {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--c-done);
+  letter-spacing: 0.08em;
+}
+.tok-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(10px, 1vw, 16px);
+  align-items: end;
+}
+.tok-stat {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.tok-num {
+  font-family: var(--font-serif);
+  font-size: clamp(28px, 3vw, 46px);
+  font-weight: 400;
+  line-height: 0.95;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+.tok-in  { color: var(--fg); }
+.tok-out { color: oklch(0.86 0.14 70); }
+.tok-cap {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-4);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+/* digit roll animation */
+.tok-num .digit {
+  display: inline-block;
+  transition: transform 0.5s cubic-bezier(.2,.8,.2,1);
+}
+
+/* ============================================================
+   needConfirm — radial wash takeover
+   ============================================================ */
+#confirm {
+  position: fixed; inset: 0;
+  z-index: 50;
+  opacity: 0;
+  pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+  transition: opacity 0.6s;
+  background:
+    radial-gradient(circle at 50% 45%,
+      oklch(0.30 0.16 25 / 0.65),
+      oklch(0.10 0.10 25 / 0.95) 70%);
+  backdrop-filter: blur(30px);
+}
+#confirm.visible { opacity: 1; pointer-events: auto; }
+
+.confirm-shake {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 2px oklch(0.70 0.22 25 / 0.4);
+  animation: ring-pulse 2.2s ease-in-out infinite;
+}
+@keyframes ring-pulse {
+  0%,100% { box-shadow: inset 0 0 0 2px oklch(0.70 0.22 25 / 0.30), inset 0 0 80px  oklch(0.70 0.22 25 / 0.18); }
+  50%     { box-shadow: inset 0 0 0 3px oklch(0.70 0.22 25 / 0.55), inset 0 0 180px oklch(0.70 0.22 25 / 0.38); }
+}
+
+.confirm-inner {
+  text-align: center;
+  padding: 40px;
+  max-width: 90vw;
+}
+.confirm-eyebrow {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-family: var(--font-mono);
+  font-size: clamp(11px, 1.1vw, 14px);
+  letter-spacing: 0.4em;
+  color: oklch(0.92 0.08 25);
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: oklch(0.22 0.10 25 / 0.5);
+  border: 1px solid oklch(0.70 0.22 25 / 0.4);
+  margin-bottom: clamp(20px, 3vw, 36px);
+}
+.confirm-text {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: clamp(70px, 12vw, 200px);
+  font-weight: 400;
+  color: oklch(0.97 0.04 25);
+  letter-spacing: -0.04em;
+  line-height: 1.0;
+  text-shadow: 0 8px 80px oklch(0.70 0.22 25 / 0.7);
+  margin-bottom: clamp(20px, 3vw, 36px);
+  animation: text-glow 2.2s ease-in-out infinite;
+}
+@keyframes text-glow {
+  0%,100% { text-shadow: 0 8px 60px oklch(0.70 0.22 25 / 0.5); }
+  50%     { text-shadow: 0 8px 140px oklch(0.70 0.22 25 / 0.9); }
+}
+.confirm-sessions {
+  display: flex; flex-direction: column; gap: 10px; align-items: center;
+}
+.confirm-row {
+  display: inline-flex; align-items: baseline; gap: 16px;
+  padding: 10px 22px;
+  border-radius: 999px;
+  background: oklch(0.22 0.06 25 / 0.5);
+  border: 1px solid oklch(0.70 0.22 25 / 0.4);
+  backdrop-filter: blur(20px);
+  animation: none;
+}
+@keyframes row-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+.confirm-name {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: clamp(22px, 2.4vw, 32px);
+  color: oklch(0.97 0.04 25);
+}
+.confirm-id {
+  font-family: var(--font-mono);
+  font-size: clamp(11px, 1vw, 13px);
+  color: oklch(0.85 0.08 25);
+  letter-spacing: 0.05em;
+}
+
+.confirm-clock {
+  position: absolute;
+  top: 28px; right: 32px;
+  font-family: var(--font-serif);
+  font-size: 22px;
+  color: oklch(0.92 0.08 25);
+  letter-spacing: 0.02em;
+}
+
+/* error */
+#error-overlay {
+  position: fixed; inset: 0;
+  background: oklch(0.10 0.04 270 / 0.92);
+  backdrop-filter: blur(20px);
+  display: none;
+  flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 12px;
+  z-index: 80;
+}
+.err-title {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: clamp(24px, 3vw, 40px);
+  color: oklch(0.85 0.20 25);
+}
+.err-sub {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-3);
+  letter-spacing: 0.1em;
+}
+</style>
+</head>
+<body data-state="idle">
+
+<div class="aurora">
+  <div class="aurora-blob blob-a"></div>
+  <div class="aurora-blob blob-b"></div>
+  <div class="aurora-blob blob-c"></div>
+  <div class="aurora-blob blob-d"></div>
+</div>
+<div class="aurora-state"></div>
+
+<div id="stage">
+  <header class="top">
+    <div class="eyebrow">
+      <span id="g-dot" class="dot dot-idle"></span>
+      <span id="g-label">IDLE</span>
+      <span style="opacity:.4">·</span>
+      <span id="g-summary">无活动 session</span>
+    </div>
+    <div class="clock-cluster">
+      <div class="clock" id="clock"><span>00</span><span class="colon">:</span><span>00</span></div>
+      <div class="date" id="date">— —</div>
+    </div>
+  </header>
+
+  <main class="body">
+    <section class="sessions-col">
+      <div class="section-h">
+        <span class="section-title">Sessions</span>
+        <span class="section-meta"><span id="sess-count">0</span> ACTIVE</span>
+      </div>
+      <div class="sessions" id="sessions">
+        <div class="placeholder">awaiting signal…</div>
+      </div>
+    </section>
+
+    <aside class="token-col">
+      <div class="section-h">
+        <span class="section-title">Token Flow</span>
+        <span class="section-meta" id="tok-updated">— —</span>
+      </div>
+      <div class="token-stack">
+        <div class="tok">
+          <div class="tok-h"><span class="tok-scope">今日</span><span class="tok-hit" id="hit-today">缓存 —</span></div>
+          <div class="tok-stats">
+            <div class="tok-stat"><span class="tok-num tok-in"  id="t-today-in">—</span><span class="tok-cap">输入</span></div>
+            <div class="tok-stat"><span class="tok-num tok-out" id="t-today-out">—</span><span class="tok-cap">输出</span></div>
+          </div>
+        </div>
+        <div class="tok">
+          <div class="tok-h"><span class="tok-scope">本月</span><span class="tok-hit" id="hit-month">缓存 —</span></div>
+          <div class="tok-stats">
+            <div class="tok-stat"><span class="tok-num tok-in"  id="t-month-in">—</span><span class="tok-cap">输入</span></div>
+            <div class="tok-stat"><span class="tok-num tok-out" id="t-month-out">—</span><span class="tok-cap">输出</span></div>
+          </div>
+        </div>
+        <div class="tok">
+          <div class="tok-h"><span class="tok-scope">累计</span><span class="tok-hit" id="hit-total">缓存命中 —</span></div>
+          <div class="tok-stats">
+            <div class="tok-stat"><span class="tok-num tok-in"  id="t-total-in">—</span><span class="tok-cap">输入</span></div>
+            <div class="tok-stat"><span class="tok-num tok-out" id="t-total-out">—</span><span class="tok-cap">输出</span></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<div id="confirm" aria-hidden="true">
+  <div class="confirm-shake"></div>
+  <div class="confirm-inner">
+    <div class="confirm-eyebrow"><span class="dot dot-needConfirm"></span><span>NEED CONFIRMATION</span></div>
+    <div class="confirm-text">等你拍板</div>
+    <div class="confirm-sessions" id="confirm-list"></div>
+  </div>
+  <div class="confirm-clock" id="confirm-clock">--:--</div>
+</div>
+
+<div id="error-overlay">
+  <div class="err-title">连接 Mac 失败</div>
+  <div class="err-sub">CHECK WIFI / SERVER.PY</div>
+</div>
+
+<script src="_common.js"></script>
+<script>
+const C = window.StatusCommon;
+
+// ───── Clock ─────
+function tickClock() {
+  const now = new Date();
+  const hh = C.pad2(now.getHours());
+  const mm = C.pad2(now.getMinutes());
+  document.getElementById('clock').innerHTML =
+    `<span>${hh}</span><span class="colon">:</span><span>${mm}</span>`;
+  document.getElementById('date').textContent = C.fmtDate(now);
+  document.getElementById('confirm-clock').textContent = `${hh}:${mm}`;
+}
+tickClock();
+setInterval(tickClock, 1000);
+
+// ───── Render sessions ─────
+function renderSessions(sessions, detail) {
+  const panel = document.getElementById('sessions');
+  document.getElementById('sess-count').textContent = sessions.length;
+
+  if (!sessions.length) {
+    panel.innerHTML = '<div class="placeholder">awaiting signal…</div>';
+    return;
+  }
+
+  const dmap = {};
+  (detail || []).forEach(d => { if (d.id) dmap[d.id] = d; });
+
+  const sorted = C.sortSessions(sessions);
+  const VIS = 5;
+  const visible = sorted.slice(0, VIS);
+  const extra = sorted.length - visible.length;
+
+  panel.innerHTML = visible.map((s, i) => {
+    const d = dmap[s.id] || {};
+    const state = s.state || 'idle';
+    const project = d.project || s.project || '未知项目';
+    const tool = d.current_tool, target = d.current_target, prompt = d.last_prompt;
+    const age = C.timeAgo(s.updated_at);
+
+    const toolHtml = tool
+      ? `<div class="card-tool"><span class="card-tool-name">${C.esc(tool)}</span>${target ? `<span class="card-tool-target">${C.esc(target)}</span>` : ''}</div>` : '';
+    const promptHtml = prompt
+      ? `<div class="card-prompt">${C.esc(prompt)}</div>` : '';
+
+    return `
+      <div class="card state-${state}" style="animation-delay: ${i*60}ms">
+        <div class="card-row1">
+          <span class="card-badge badge-${state}">${C.STATE_LABEL[state] || state}</span>
+          <span class="card-project">${C.esc(project)}</span>
+          <span class="card-id">${C.esc((s.id||'').slice(0,8))}</span>
+          <span class="card-age">${age}</span>
+        </div>
+        ${toolHtml}${promptHtml}
+      </div>
+    `;
+  }).join('') + (extra > 0 ? `<div class="more">+ ${extra} 更多 session</div>` : '');
+}
+
+// ───── Render top bar ─────
+function renderTop(gs, sessions) {
+  const dot = document.getElementById('g-dot');
+  dot.className = 'dot dot-' + (gs || 'idle');
+  document.getElementById('g-label').textContent = (C.STATE_LABEL[gs] || '空闲').toUpperCase();
+
+  const counts = {};
+  sessions.forEach(s => { counts[s.state] = (counts[s.state] || 0) + 1; });
+  const total = sessions.length;
+  const order = ['working','thinking','needConfirm','done','idle'];
+  const parts = order.filter(k => counts[k]).map(k => `${counts[k]} ${k}`);
+  const summary = total === 0 ? '无活动 session'
+    : `${total} session${total!==1?'s':''}` + (parts.length ? ` · ${parts.join(' · ')}` : '');
+  document.getElementById('g-summary').textContent = summary;
+
+  document.body.dataset.state = gs || 'idle';
+}
+
+// ───── Render confirm ─────
+function renderConfirm(sessions) {
+  const list = sessions.filter(s => s.state === 'needConfirm');
+  document.getElementById('confirm-list').innerHTML = list.map((s, i) => `
+    <div class="confirm-row" style="animation-delay:${i*100}ms">
+      <span class="confirm-name">${C.esc(s.project || '未知项目')}</span>
+      <span class="confirm-id">${C.esc((s.id||'').slice(0,8))}</span>
+    </div>`).join('');
+}
+
+// ───── Render tokens (smooth update) ─────
+const prevTokens = {};
+function setTokenNum(id, val) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const formatted = C.fmtTokens(val);
+  if (el.textContent === formatted) return;
+  // fade-out, swap, fade-in
+  el.style.transition = 'opacity .25s, transform .25s';
+  el.style.opacity = '0'; el.style.transform = 'translateY(-4px)';
+  setTimeout(() => {
+    el.textContent = formatted;
+    el.style.opacity = '1'; el.style.transform = 'none';
+  }, 220);
+}
+
+function renderTokens(data) {
+  if (!data) return;
+  const t = data.today || {}, m = data.month || {}, a = data.total || {};
+  setTokenNum('t-today-in',  t.input);
+  setTokenNum('t-today-out', t.output);
+  setTokenNum('t-month-in',  m.input);
+  setTokenNum('t-month-out', m.output);
+  setTokenNum('t-total-in',  a.input);
+  setTokenNum('t-total-out', a.output);
+
+  const th = C.hitRate(t), mh = C.hitRate(m), ah = C.hitRate(a);
+  document.getElementById('hit-today').textContent = th!==null?`缓存 ${th}%`:'缓存 —';
+  document.getElementById('hit-month').textContent = mh!==null?`缓存 ${mh}%`:'缓存 —';
+  document.getElementById('hit-total').textContent = ah!==null?`缓存命中 ${ah}%`:'缓存命中 —';
+  if (data.last_updated) {
+    document.getElementById('tok-updated').textContent = C.fmtTimeHM(new Date(data.last_updated)) + ' UPDATED';
+  }
+}
+
+// ───── Wire common ─────
+C.init({
+  onState(cur, detail) {
+    const gs = cur.global_state || 'idle';
+    const sessions = cur.sessions || [];
+    const isConfirm = gs === 'needConfirm';
+
+    document.getElementById('stage').classList.toggle('hidden', isConfirm);
+    document.getElementById('confirm').classList.toggle('visible', isConfirm);
+
+    renderTop(gs, sessions);
+    renderSessions(sessions, detail);
+    renderConfirm(sessions);
+
+    document.getElementById('error-overlay').style.display = 'none';
+  },
+  onTokens: renderTokens,
+  onError(isErr) {
+    document.getElementById('error-overlay').style.display = isErr ? 'flex' : 'none';
+  }
+});
+</script>
+</body>
+</html>

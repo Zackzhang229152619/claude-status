@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Status · Garden</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --sky-0: #0a1820;
+  --sky-1: #112a30;
+  --earth: #1f3024;
+
+  --leaf-1: #6da37a;
+  --leaf-2: #87b888;
+  --stem:   #4a6a52;
+
+  --fg:   #e6efe6;
+  --fg-2: #b8c8b8;
+  --fg-3: #7a8c80;
+  --fg-4: #54665a;
+
+  --c-working:  #f3c969;
+  --c-thinking: #7adfff;
+  --c-done:     #ff96c2;
+  --c-idle:     #8b9a8e;
+  --c-confirm:  #ff5b50;
+
+  --font-serif: "Cormorant Garamond", "Times New Roman", serif;
+  --font-mono:  "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --font-sans:  -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  width: 100%; height: 100%;
+  background: var(--sky-0);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================================================
+   Sky background — gradient & stars
+   ============================================================ */
+#sky {
+  position: fixed; inset: 0;
+  background:
+    radial-gradient(ellipse at 50% 100%, oklch(0.30 0.06 160) 0%, transparent 65%),
+    linear-gradient(180deg, #050a10 0%, #0a1820 40%, #112a30 75%, #1f3024 100%);
+  z-index: 0;
+  transition: background 1.6s ease;
+}
+body[data-state="working"]     #sky { background: radial-gradient(ellipse at 50% 100%, oklch(0.32 0.10 80)  0%, transparent 60%), linear-gradient(180deg, #050a10 0%, #1a1a20 40%, #2e2520 78%, #1f3024 100%); }
+body[data-state="thinking"]    #sky { background: radial-gradient(ellipse at 50% 100%, oklch(0.30 0.10 220) 0%, transparent 60%), linear-gradient(180deg, #050a18 0%, #0d1d2c 40%, #14313c 75%, #1f3024 100%); }
+body[data-state="done"]        #sky { background: radial-gradient(ellipse at 50% 100%, oklch(0.34 0.10 320) 0%, transparent 60%), linear-gradient(180deg, #0a0612 0%, #1b1124 40%, #2a1c34 75%, #1f3024 100%); }
+body[data-state="needConfirm"] #sky { background: radial-gradient(ellipse at 50% 50%, oklch(0.36 0.20 25)  0%, transparent 65%), linear-gradient(180deg, #1a0508 0%, #2a0a10 40%, #38121a 75%, #2c0a14 100%); }
+
+#stars {
+  position: fixed; inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* ============================================================
+   Stage
+   ============================================================ */
+#stage {
+  position: relative;
+  z-index: 5;
+  width: 100%; height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  transition: opacity 0.6s, transform 0.6s;
+}
+#stage.recede { opacity: 0.18; transform: scale(0.95); pointer-events: none; filter: blur(2px); }
+
+/* ============================================================
+   Top — status + clock (corners)
+   ============================================================ */
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: clamp(20px, 2.4vw, 32px) clamp(24px, 2.8vw, 40px) 0;
+}
+.status-card {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: oklch(0.15 0.02 180 / 0.5);
+  border: 1px solid oklch(0.55 0.03 160 / 0.20);
+  backdrop-filter: blur(14px);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--fg-2);
+}
+.dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--c-idle);
+  transform: translateY(1px);
+  display: inline-block;
+  margin-right: 6px;
+}
+.dot-working     { background: var(--c-working);  box-shadow: 0 0 14px var(--c-working); animation: none; }
+.dot-thinking    { background: var(--c-thinking); box-shadow: 0 0 14px var(--c-thinking); animation: none; }
+.dot-done        { background: var(--c-done);     box-shadow: 0 0 12px var(--c-done); }
+.dot-idle        { background: var(--c-idle);     opacity: 0.5; }
+.dot-needConfirm { background: var(--c-confirm);  box-shadow: 0 0 16px var(--c-confirm); animation: none; }
+@keyframes breathe {
+  0%,100% { transform: scale(1)    translateY(1px); }
+  50%     { transform: scale(1.35) translateY(1px); filter: brightness(1.3); }
+}
+.status-label { color: var(--fg); text-transform: uppercase; font-weight: 500; }
+.status-sum   { color: var(--fg-3); }
+
+.clock-area {
+  text-align: right;
+  font-family: var(--font-serif);
+  line-height: 1;
+}
+.clock {
+  font-size: clamp(40px, 5vw, 64px);
+  font-weight: 400;
+  font-style: italic;
+  color: var(--fg);
+  letter-spacing: -0.02em;
+  text-shadow: 0 0 30px oklch(0.5 0.10 180 / 0.5);
+}
+.clock .colon { opacity: 0.5; animation: blink 2s ease-in-out infinite; }
+@keyframes blink { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+.date {
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* ============================================================
+   The garden — plants row
+   ============================================================ */
+.garden {
+  position: relative;
+  min-height: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 clamp(24px, 3vw, 60px);
+  overflow: hidden;
+}
+.garden-strip {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: clamp(12px, 1.5vw, 24px);
+  align-items: end;
+  justify-items: center;
+  max-width: 1400px;
+}
+
+@media (orientation: portrait), (max-width: 820px) {
+  .garden-strip { grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); }
+}
+
+/* a plant */
+.plant {
+  position: relative;
+  width: 100%;
+  max-width: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  animation: none;
+  --sway: 1;
+}
+@keyframes plant-in {
+  from { opacity: 0; transform: translateY(40px) scaleY(0.4); transform-origin: bottom; }
+  to   { opacity: 1; transform: none; }
+}
+.plant-svg {
+  width: 100%;
+  height: clamp(140px, 18vh, 240px);
+  display: block;
+}
+.plant-svg .stem    { stroke: var(--stem); stroke-width: 3; fill: none; stroke-linecap: round; }
+.plant-svg .leaf    { fill: var(--leaf-1); transform-origin: var(--leaf-orig); animation: leaf-sway 4s ease-in-out infinite; }
+.plant-svg .leaf-2  { fill: var(--leaf-2); }
+.plant-svg .stem-group { transform-origin: 50% 100%; animation: stem-sway 6s ease-in-out infinite; }
+
+@keyframes stem-sway {
+  0%,100% { transform: rotate(-0.8deg); }
+  50%     { transform: rotate( 1.2deg); }
+}
+@keyframes leaf-sway {
+  0%,100% { transform: rotate(-3deg); }
+  50%     { transform: rotate( 3deg); }
+}
+
+/* crown — varies by state */
+.crown-working .bud { fill: var(--c-working); animation: none; transform-origin: center; }
+.crown-working .bud-glow { fill: var(--c-working); opacity: 0.35; filter: blur(6px); animation: none; transform-origin: center; }
+@keyframes bud-breathe {
+  0%,100% { transform: scale(1);    opacity: 0.92; }
+  50%     { transform: scale(1.08); opacity: 1; }
+}
+
+.crown-thinking .think-particle {
+  fill: var(--c-thinking);
+  filter: drop-shadow(0 0 4px var(--c-thinking));
+  animation: think-float 3s ease-in-out infinite;
+}
+@keyframes think-float {
+  0%   { opacity: 0;   transform: translateY(0)     scale(0.4); }
+  20%  { opacity: 1;   transform: translateY(-10px) scale(1); }
+  80%  { opacity: 1;   transform: translateY(-30px) scale(1); }
+  100% { opacity: 0;   transform: translateY(-50px) scale(0.5); }
+}
+
+.crown-done .petal {
+  fill: var(--c-done);
+  transform-origin: 50% 100%;
+  animation: petal-open 0.9s cubic-bezier(.2,1.5,.4,1) backwards;
+}
+@keyframes petal-open {
+  from { transform: scale(0) rotate(0); }
+  to   { transform: scale(1); }
+}
+.crown-done .stamen { fill: #fff5a8; }
+
+.crown-idle .bud { fill: var(--c-idle); opacity: 0.5; }
+
+.crown-needConfirm .alarm {
+  fill: var(--c-confirm);
+  filter: drop-shadow(0 0 8px var(--c-confirm));
+  animation: none;
+  transform-origin: 50% 100%;
+}
+@keyframes alarm-shake {
+  0%,100% { transform: translateX(0) scale(1); }
+  25%     { transform: translateX(-1.5px) scale(1.02); }
+  75%     { transform: translateX( 1.5px) scale(1.02); }
+}
+
+/* plant ground glow halo */
+.plant-glow {
+  position: absolute;
+  bottom: 30px;
+  width: 80%;
+  height: 30px;
+  background: radial-gradient(ellipse at center, var(--crown-color, transparent) 0%, transparent 70%);
+  filter: blur(8px);
+  opacity: 0.6;
+  pointer-events: none;
+  transition: background 1s;
+}
+.plant.state-working     { --crown-color: oklch(0.78 0.16 80  / 0.55); }
+.plant.state-thinking    { --crown-color: oklch(0.80 0.15 220 / 0.50); }
+.plant.state-done        { --crown-color: oklch(0.78 0.12 340 / 0.50); }
+.plant.state-needConfirm { --crown-color: oklch(0.65 0.22 25  / 0.65); }
+.plant.state-idle        { --crown-color: transparent; }
+
+.plant-meta {
+  text-align: center;
+  width: 100%;
+  font-family: var(--font-serif);
+  z-index: 1;
+}
+.plant-name {
+  font-size: clamp(15px, 1.4vw, 19px);
+  font-style: italic;
+  color: var(--fg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.plant-tool {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-3);
+  letter-spacing: 0.04em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin-top: 2px;
+}
+.plant-id {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--fg-4);
+  letter-spacing: 0.06em;
+  margin-top: 1px;
+}
+
+.empty-garden {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: clamp(20px, 2vw, 30px);
+  color: var(--fg-3);
+  opacity: 0.6;
+  letter-spacing: -0.01em;
+  text-align: center;
+  align-self: center;
+  margin: auto;
+}
+
+/* ============================================================
+   River — token flow at bottom
+   ============================================================ */
+.river-wrap {
+  position: relative;
+  height: clamp(180px, 22vh, 260px);
+  flex-shrink: 0;
+}
+#river {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  display: block;
+}
+
+.river-labels {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: end;
+  padding: 0 clamp(24px, 3vw, 48px) clamp(16px, 1.5vw, 24px);
+  pointer-events: none;
+  gap: 16px;
+}
+.river-col {
+  display: flex; flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg);
+  font-family: var(--font-serif);
+}
+.river-scope {
+  font-style: italic;
+  font-size: clamp(13px, 1.2vw, 17px);
+  color: var(--fg-2);
+  letter-spacing: 0;
+}
+.river-amount {
+  font-size: clamp(28px, 3vw, 44px);
+  font-weight: 500;
+  color: var(--fg);
+  text-shadow: 0 2px 20px oklch(0.4 0.08 180 / 0.7);
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+.river-detail {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--fg-3);
+  text-transform: uppercase;
+}
+.river-detail .out { color: var(--c-working); }
+.river-detail .hit { color: var(--c-done); margin-left: 8px; }
+
+/* ============================================================
+   needConfirm — sky turns red, big text overlay
+   ============================================================ */
+#confirm {
+  position: fixed; inset: 0;
+  z-index: 50;
+  opacity: 0;
+  pointer-events: none;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  transition: opacity 0.7s ease;
+  background:
+    radial-gradient(circle at 50% 40%,
+      oklch(0.40 0.18 25 / 0.7),
+      oklch(0.12 0.08 25 / 0.92) 70%);
+  padding: 40px;
+}
+#confirm.visible { opacity: 1; pointer-events: auto; }
+
+.confirm-flowers {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle 200px at 15% 30%, oklch(0.55 0.20 25 / 0.3), transparent),
+    radial-gradient(circle 240px at 85% 60%, oklch(0.55 0.20 25 / 0.3), transparent),
+    radial-gradient(circle 180px at 30% 80%, oklch(0.55 0.20 25 / 0.25), transparent),
+    radial-gradient(circle 220px at 75% 20%, oklch(0.55 0.20 25 / 0.25), transparent);
+  filter: blur(20px);
+  animation: bloom 2s ease-in-out infinite alternate;
+}
+@keyframes bloom {
+  from { transform: scale(0.95); opacity: 0.8; }
+  to   { transform: scale(1.05); opacity: 1; }
+}
+
+.confirm-inner {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+}
+.confirm-eyebrow {
+  display: inline-flex; align-items: center; gap: 12px;
+  font-family: var(--font-mono);
+  font-size: clamp(11px, 1.1vw, 14px);
+  letter-spacing: 0.4em;
+  color: oklch(0.95 0.06 25);
+  padding: 8px 20px;
+  border-radius: 999px;
+  background: oklch(0.25 0.10 25 / 0.6);
+  border: 1px solid oklch(0.70 0.20 25 / 0.4);
+  text-transform: uppercase;
+  margin-bottom: clamp(20px, 3vw, 36px);
+}
+.confirm-text {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: clamp(80px, 14vw, 240px);
+  color: oklch(0.97 0.04 25);
+  letter-spacing: -0.04em;
+  line-height: 1;
+  text-shadow: 0 8px 80px oklch(0.7 0.22 25 / 0.7);
+  margin-bottom: clamp(20px, 3vw, 36px);
+}
+.confirm-list {
+  display: flex; flex-direction: column; gap: 12px; align-items: center;
+}
+.confirm-row {
+  display: inline-flex; align-items: baseline; gap: 16px;
+  padding: 10px 24px;
+  border: 1px solid oklch(0.70 0.20 25 / 0.45);
+  border-radius: 999px;
+  background: oklch(0.22 0.08 25 / 0.5);
+  backdrop-filter: blur(12px);
+  font-family: var(--font-serif);
+  animation: none;
+}
+@keyframes row-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+.confirm-name {
+  font-size: clamp(22px, 2.4vw, 32px);
+  font-style: italic;
+  color: oklch(0.97 0.04 25);
+}
+.confirm-id {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: oklch(0.85 0.10 25);
+  letter-spacing: 0.05em;
+}
+.confirm-clock {
+  position: absolute;
+  top: clamp(20px, 2.6vw, 32px);
+  right: clamp(24px, 2.8vw, 40px);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: clamp(20px, 2vw, 28px);
+  color: oklch(0.92 0.08 25);
+}
+
+/* error */
+#error-overlay {
+  position: fixed; inset: 0;
+  background: oklch(0.06 0.02 180 / 0.94);
+  backdrop-filter: blur(20px);
+  display: none;
+  flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 14px;
+  z-index: 80;
+}
+.err-title {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: clamp(28px, 3vw, 40px);
+  color: var(--c-confirm);
+}
+.err-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+</style>
+</head>
+<body data-state="idle">
+
+<div id="sky"></div>
+<canvas id="stars"></canvas>
+
+<div id="stage">
+  <header class="top">
+    <div class="status-card">
+      <span id="g-dot" class="dot dot-idle"></span>
+      <span class="status-label" id="g-label">IDLE</span>
+      <span style="opacity:0.4">·</span>
+      <span class="status-sum" id="g-summary">花园中无活动</span>
+    </div>
+    <div class="clock-area">
+      <div class="clock" id="clock"><span>00</span><span class="colon">:</span><span>00</span></div>
+      <div class="date" id="date">— —</div>
+    </div>
+  </header>
+
+  <main class="garden">
+    <div class="garden-strip" id="garden">
+      <div class="empty-garden">花园在静默中等待…</div>
+    </div>
+  </main>
+
+  <footer class="river-wrap">
+    <canvas id="river"></canvas>
+    <div class="river-labels">
+      <div class="river-col">
+        <span class="river-scope">今日 · today</span>
+        <span class="river-amount" id="t-today-in">—</span>
+        <span class="river-detail">输入 · <span class="out" id="t-today-out">—</span> 输出<span class="hit" id="hit-today">缓存 —</span></span>
+      </div>
+      <div class="river-col">
+        <span class="river-scope">本月 · month</span>
+        <span class="river-amount" id="t-month-in">—</span>
+        <span class="river-detail">输入 · <span class="out" id="t-month-out">—</span> 输出<span class="hit" id="hit-month">缓存 —</span></span>
+      </div>
+      <div class="river-col">
+        <span class="river-scope">累计 · all time</span>
+        <span class="river-amount" id="t-total-in">—</span>
+        <span class="river-detail">输入 · <span class="out" id="t-total-out">—</span> 输出<span class="hit" id="hit-total">缓存命中 —</span></span>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<div id="confirm" aria-hidden="true">
+  <div class="confirm-flowers"></div>
+  <div class="confirm-inner">
+    <div class="confirm-eyebrow"><span class="dot dot-needConfirm"></span><span>NEED CONFIRMATION</span></div>
+    <div class="confirm-text">等你拍板</div>
+    <div class="confirm-list" id="confirm-list"></div>
+  </div>
+  <div class="confirm-clock" id="confirm-clock">--:--</div>
+</div>
+
+<div id="error-overlay">
+  <div class="err-title">— 花园失联 —</div>
+  <div class="err-sub">CHECK WIFI · SERVER.PY</div>
+</div>
+
+<script src="_common.js"></script>
+<script>
+const C = window.StatusCommon;
+
+/* ===== STARS CANVAS ===== */
+(function stars() {
+  const canvas = document.getElementById('stars');
+  const ctx = canvas.getContext('2d');
+  let stars = [];
+
+  function resize() {
+    canvas.width  = window.innerWidth  * devicePixelRatio;
+    canvas.height = window.innerHeight * devicePixelRatio;
+    canvas.style.width  = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+    stars = Array.from({length: 90}, () => ({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height * 0.65,
+      r: (Math.random() * 1.2 + 0.4) * devicePixelRatio,
+      a: Math.random() * Math.PI * 2,
+      sp: 0.6 + Math.random() * 1.4
+    }));
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  function frame(t) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    stars.forEach(s => {
+      const tw = (Math.sin(t / 800 * s.sp + s.a) + 1) / 2;
+      ctx.globalAlpha = 0.25 + tw * 0.55;
+      ctx.fillStyle = '#e8f0f5';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+
+/* ===== RIVER CANVAS ===== */
+const riverState = { flow: 0.3 }; // 0..1 represents intensity
+(function river() {
+  const canvas = document.getElementById('river');
+  const ctx = canvas.getContext('2d');
+  let particles = [];
+
+  function resize() {
+    canvas.width  = canvas.offsetWidth  * devicePixelRatio;
+    canvas.height = canvas.offsetHeight * devicePixelRatio;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  function spawnParticle() {
+    if (particles.length > 70) return;
+    particles.push({
+      x: -10,
+      y: canvas.height * (0.4 + Math.random() * 0.55),
+      vx: 0.5 + Math.random() * 2,
+      r: (1 + Math.random() * 2.5) * devicePixelRatio,
+      gold: Math.random() < 0.18,
+      life: 1
+    });
+  }
+
+  function frame(t) {
+    resize();
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // base river — sine waves
+    ctx.lineWidth = 1.5 * devicePixelRatio;
+    for (let layer = 0; layer < 4; layer++) {
+      const yMid = h * (0.45 + layer * 0.12);
+      const amp = h * (0.025 + layer * 0.015);
+      const freq = 0.004 + layer * 0.001;
+      const phase = t * (0.0008 + layer * 0.0003);
+      ctx.beginPath();
+      for (let x = 0; x <= w; x += 4 * devicePixelRatio) {
+        const y = yMid + Math.sin(x * freq + phase) * amp;
+        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      const alpha = 0.10 + layer * 0.06;
+      ctx.strokeStyle = `oklch(0.55 0.10 200 / ${alpha})`;
+      ctx.stroke();
+    }
+
+    // particles
+    if (Math.random() < 0.25 + riverState.flow * 0.55) spawnParticle();
+    particles.forEach(p => {
+      p.x += p.vx * devicePixelRatio;
+      p.y += Math.sin((p.x * 0.01) + (t * 0.001)) * 0.3;
+    });
+    particles = particles.filter(p => p.x < w + 10);
+
+    particles.forEach(p => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = p.gold ? 'oklch(0.85 0.18 80 / 0.85)' : 'oklch(0.85 0.10 200 / 0.8)';
+      ctx.shadowColor = p.gold ? 'oklch(0.85 0.18 80)' : 'oklch(0.85 0.10 200)';
+      ctx.shadowBlur = 10 * devicePixelRatio;
+      ctx.fill();
+    });
+    ctx.shadowBlur = 0;
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+
+/* ===== CLOCK ===== */
+function tickClock() {
+  const now = new Date();
+  const hh = C.pad2(now.getHours()), mm = C.pad2(now.getMinutes());
+  document.getElementById('clock').innerHTML = `<span>${hh}</span><span class="colon">:</span><span>${mm}</span>`;
+  document.getElementById('date').textContent = C.fmtDate(now);
+  document.getElementById('confirm-clock').textContent = hh + ':' + mm;
+}
+tickClock();
+setInterval(tickClock, 1000);
+
+/* ===== PLANT GENERATOR ===== */
+function hashId(id) {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = ((h << 5) - h) + id.charCodeAt(i);
+  return Math.abs(h);
+}
+
+function makePlantSVG(id, state) {
+  const h = hashId(id);
+  const variant = h % 4;
+  const leafSide = h % 2 === 0 ? 1 : -1;
+  const stemHeight = 88 + (h % 20);
+  const w = 100;
+  const baseY = 200;
+
+  // build stem path — gentle curve
+  const stemPath = `M ${w/2} ${baseY} C ${w/2 + 6*leafSide} ${baseY-30}, ${w/2 - 8*leafSide} ${baseY-60}, ${w/2 + 4*leafSide} ${baseY-stemHeight}`;
+
+  // leaves
+  const leaves = [];
+  const leafCount = 2 + (h % 3);
+  for (let i = 0; i < leafCount; i++) {
+    const t = 0.35 + i * 0.18;
+    const lx = w/2 + (i % 2 === 0 ? -1 : 1) * (10 + (h % 6));
+    const ly = baseY - stemHeight * t;
+    const rot = (i % 2 === 0 ? -40 : 40) + ((h + i) % 12);
+    leaves.push(`<ellipse class="leaf ${i%2 ? 'leaf-2' : ''}" cx="${lx}" cy="${ly}" rx="13" ry="6" transform="rotate(${rot} ${lx} ${ly})" style="--leaf-orig: ${lx}px ${ly}px; animation-delay:${i*-0.4}s" />`);
+  }
+
+  // crown — varies by state
+  const topX = w/2 + 4*leafSide;
+  const topY = baseY - stemHeight;
+  let crown = '';
+  if (state === 'working') {
+    crown = `
+      <g class="crown-working">
+        <circle class="bud-glow" cx="${topX}" cy="${topY}" r="14" />
+        <circle class="bud" cx="${topX}" cy="${topY}" r="6" />
+      </g>`;
+  } else if (state === 'thinking') {
+    crown = `
+      <g class="crown-thinking">
+        <circle class="think-particle" cx="${topX}" cy="${topY-2}" r="2.5" style="animation-delay:0s" />
+        <circle class="think-particle" cx="${topX-5}" cy="${topY-2}" r="2" style="animation-delay:-1.2s" />
+        <circle class="think-particle" cx="${topX+5}" cy="${topY-2}" r="2" style="animation-delay:-2.2s" />
+      </g>`;
+  } else if (state === 'done') {
+    // bloom — 6 petals
+    const petals = [];
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 - Math.PI/2;
+      const px = topX + Math.cos(a) * 6;
+      const py = topY + Math.sin(a) * 6;
+      petals.push(`<ellipse class="petal" cx="${px}" cy="${py}" rx="5" ry="9" transform="rotate(${(i/6)*360} ${topX} ${topY})" style="animation-delay:${i*60}ms" />`);
+    }
+    crown = `<g class="crown-done">${petals.join('')}<circle class="stamen" cx="${topX}" cy="${topY}" r="3.5" /></g>`;
+  } else if (state === 'needConfirm') {
+    crown = `
+      <g class="crown-needConfirm">
+        <polygon class="alarm" points="${topX},${topY-14} ${topX-7},${topY+2} ${topX+7},${topY+2}" />
+        <rect class="alarm" x="${topX-1.5}" y="${topY-8}" width="3" height="5" fill="#fff" />
+        <circle class="alarm" cx="${topX}" cy="${topY-1}" r="1.4" fill="#fff" />
+      </g>`;
+  } else { // idle
+    crown = `<g class="crown-idle"><circle class="bud" cx="${topX}" cy="${topY}" r="3.5" /></g>`;
+  }
+
+  return `
+    <svg class="plant-svg" viewBox="0 0 ${w} 220" preserveAspectRatio="xMidYEnd meet">
+      <g class="stem-group" style="animation-delay:${(h%10) * -0.3}s; animation-duration:${5 + (h%5)}s">
+        <path class="stem" d="${stemPath}" stroke-dasharray="1000" stroke-dashoffset="0" />
+        ${leaves.join('')}
+        ${crown}
+      </g>
+    </svg>`;
+}
+
+/* ===== RENDER ===== */
+function renderGarden(sessions, detail) {
+  const wrap = document.getElementById('garden');
+
+  if (!sessions.length) {
+    wrap.innerHTML = '<div class="empty-garden">花园在静默中等待…</div>';
+    return;
+  }
+
+  const dmap = {};
+  (detail || []).forEach(d => { if (d.id) dmap[d.id] = d; });
+
+  const sorted = C.sortSessions(sessions);
+  const VIS = 7;
+  const visible = sorted.slice(0, VIS);
+
+  wrap.innerHTML = visible.map((s, i) => {
+    const d = dmap[s.id] || {};
+    const state = s.state || 'idle';
+    const project = d.project || s.project || '未知项目';
+    const tool = d.current_tool;
+    const target = d.current_target;
+    const toolLine = tool
+      ? (target ? `${tool} · ${target}` : tool)
+      : '';
+    return `
+      <div class="plant state-${state}" style="animation-delay:${i*120}ms">
+        ${makePlantSVG(s.id || ('p'+i), state)}
+        <div class="plant-glow"></div>
+        <div class="plant-meta">
+          <div class="plant-name">${C.esc(project)}</div>
+          ${toolLine ? `<div class="plant-tool">${C.esc(toolLine)}</div>` : ''}
+          <div class="plant-id">№ ${C.esc((s.id||'').slice(0,8))} · ${C.timeAgo(s.updated_at)}</div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function renderTop(gs, sessions) {
+  document.getElementById('g-dot').className = 'dot dot-' + (gs || 'idle');
+  document.getElementById('g-label').textContent = (C.STATE_LABEL[gs] || '空闲').toUpperCase();
+  const counts = {};
+  sessions.forEach(s => { counts[s.state] = (counts[s.state] || 0) + 1; });
+  const total = sessions.length;
+  const order = ['working','thinking','needConfirm','done','idle'];
+  const parts = order.filter(k => counts[k]).map(k => `${counts[k]} ${k}`);
+  const summary = total === 0 ? '花园中无活动'
+    : `${total} 株植物` + (parts.length ? ` · ${parts.join(' · ')}` : '');
+  document.getElementById('g-summary').textContent = summary;
+  document.body.dataset.state = gs || 'idle';
+}
+
+function renderConfirm(sessions) {
+  const list = sessions.filter(s => s.state === 'needConfirm');
+  document.getElementById('confirm-list').innerHTML = list.map((s,i) => `
+    <div class="confirm-row" style="animation-delay:${i*120}ms">
+      <span class="confirm-name">${C.esc(s.project || '未知项目')}</span>
+      <span class="confirm-id">${C.esc((s.id||'').slice(0,8))}</span>
+    </div>`).join('');
+}
+
+function setNum(id, val) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const formatted = C.fmtTokens(val);
+  if (el.textContent === formatted) return;
+  el.style.transition = 'opacity .3s, transform .3s';
+  el.style.opacity = '0'; el.style.transform = 'translateY(-4px)';
+  setTimeout(() => { el.textContent = formatted; el.style.opacity = '1'; el.style.transform = 'none'; }, 250);
+}
+
+function renderTokens(data) {
+  if (!data) return;
+  const t = data.today || {}, m = data.month || {}, a = data.total || {};
+  setNum('t-today-in', t.input); setNum('t-today-out', t.output);
+  setNum('t-month-in', m.input); setNum('t-month-out', m.output);
+  setNum('t-total-in', a.input); setNum('t-total-out', a.output);
+  const th=C.hitRate(t),mh=C.hitRate(m),ah=C.hitRate(a);
+  document.getElementById('hit-today').textContent = th!==null?` · 缓存 ${th}%`:'';
+  document.getElementById('hit-month').textContent = mh!==null?` · 缓存 ${mh}%`:'';
+  document.getElementById('hit-total').textContent = ah!==null?` · 命中 ${ah}%`:'';
+
+  // adjust river flow based on today's input volume (log scale)
+  const log = Math.log10(Math.max(1, t.input || 0));
+  riverState.flow = Math.min(1, log / 7);
+}
+
+C.init({
+  onState(cur, detail) {
+    const gs = cur.global_state || 'idle';
+    const sessions = cur.sessions || [];
+    const isConfirm = gs === 'needConfirm';
+    document.getElementById('stage').classList.toggle('recede', isConfirm);
+    document.getElementById('confirm').classList.toggle('visible', isConfirm);
+    renderTop(gs, sessions);
+    renderGarden(sessions, detail);
+    renderConfirm(sessions);
+    document.getElementById('error-overlay').style.display = 'none';
+  },
+  onTokens: renderTokens,
+  onError(isErr) {
+    document.getElementById('error-overlay').style.display = isErr ? 'flex' : 'none';
+  }
+});
+</script>
+</body>
+</html>

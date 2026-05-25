@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS LaunchAgent for claude-status server.
+  Install:
+    1. Replace YOUR_USERNAME below with your macOS username.
+    2. Copy to ~/Library/LaunchAgents/
+    3. launchctl load ~/Library/LaunchAgents/com.example.claude-status-server.plist
+    4. Server auto-starts on login and restarts on crash.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.example.claude-status-server</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/YOUR_USERNAME/.claude/status/start_server.sh</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/YOUR_USERNAME/.claude/status/server.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/YOUR_USERNAME/.claude/status/server.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/YOUR_USERNAME/.claude/status</string>
+</dict>
+</plist>
