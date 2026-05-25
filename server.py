@@ -14,9 +14,19 @@ Custom HTTP routes:
 import json
 import os
 import glob
+import sys
+import threading
 import time
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+try:
+    from pywebpush import webpush, WebPushException  # optional, enables push
+    PUSH_AVAILABLE = True
+except ImportError:
+    PUSH_AVAILABLE = False
+    webpush = None
+    WebPushException = Exception
 
 BASE_DIR = os.path.expanduser("~/.claude/status")
 PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
@@ -265,6 +275,15 @@ class StatusHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]  # strip query string
 
+        # Deny sensitive files (private keys / subs / logs / backups / venv)
+        if any(part in path for part in ("vapid_private.pem", "vapid_keys.json",
+                                         "subscriptions.json", "server.log",
+                                         "/backups/", "/.venv/", "/.lock")):
+            self.send_response(403)
+            self.end_headers()
+            self.wfile.write(b"403 Forbidden")
+            return
+
         if path == "/":
             self.send_response(302)
             self.send_header("Location", "/dashboard.html")
@@ -279,9 +298,44 @@ class StatusHandler(SimpleHTTPRequestHandler):
             self._serve_dynamic_json(get_sessions_detail_cached())
         elif path == "/token_stats.json":
             self._serve_dynamic_json(get_token_stats_cached())
+        elif path == "/vapid-public-key":
+            self._serve_dynamic_json(
+                json.dumps({"publicKey": get_vapid_public_key()}).encode()
+            )
         else:
             # Fallback: let SimpleHTTPRequestHandler serve any static file under BASE_DIR
             return super().do_GET()
+
+    def do_POST(self):
+        path = self.path.split("?")[0]
+
+        if path == "/push/subscribe":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(length).decode("utf-8")
+                sub = json.loads(body)
+                if not (isinstance(sub, dict) and sub.get("endpoint") and sub.get("keys")):
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(b'{"ok":false,"error":"invalid subscription"}')
+                    return
+                add_subscription(sub)
+                self._serve_dynamic_json(b'{"ok":true}')
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(f'{{"ok":false,"error":"{e}"}}'.encode())
+        elif path == "/push/test":
+            count = send_push_to_all({
+                "title": "Claude Status — test",
+                "body": "If you see this, push works.",
+                "tag": "claude-test",
+            })
+            self._serve_dynamic_json(json.dumps({"ok": True, "delivered": count}).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b"404 Not Found")
 
     def _serve_file(self, filepath: str, content_type: str):
         try:
@@ -313,9 +367,156 @@ class StatusHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
 
+# ============================================================
+# Web Push (optional — PWA notifications)
+# ============================================================
+VAPID_KEYS_FILE = os.path.join(BASE_DIR, "vapid_keys.json")
+VAPID_PRIVATE_PEM = os.path.join(BASE_DIR, "vapid_private.pem")
+SUBSCRIPTIONS_FILE = os.path.join(BASE_DIR, "subscriptions.json")
+VAPID_CLAIMS_SUB = "mailto:noreply@example.com"
+
+
+def get_vapid_public_key() -> str:
+    """Return VAPID public key as base64url string (clients use this to subscribe)."""
+    try:
+        with open(VAPID_KEYS_FILE) as f:
+            return json.load(f).get("public_b64url", "")
+    except FileNotFoundError:
+        return ""
+
+
+def load_subscriptions() -> list:
+    try:
+        with open(SUBSCRIPTIONS_FILE) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return []
+    except Exception:
+        return []
+
+
+_subs_lock = threading.Lock()
+
+
+def save_subscriptions(subs: list):
+    with _subs_lock:
+        with open(SUBSCRIPTIONS_FILE, "w") as f:
+            json.dump(subs, f, indent=2)
+
+
+def add_subscription(sub: dict):
+    """Add a new subscription, de-duplicating by endpoint."""
+    subs = load_subscriptions()
+    endpoint = sub.get("endpoint")
+    subs = [s for s in subs if s.get("endpoint") != endpoint]
+    subs.append(sub)
+    save_subscriptions(subs)
+
+
+def send_push_to_all(payload: dict) -> int:
+    """Send a Web Push notification to every stored subscription. Returns delivered count."""
+    if not PUSH_AVAILABLE:
+        print("[push] pywebpush not installed; skipping", file=sys.stderr, flush=True)
+        return 0
+    try:
+        with open(VAPID_PRIVATE_PEM) as f:
+            vapid_priv_pem = f.read()
+    except FileNotFoundError:
+        print("[push] vapid_private.pem missing", file=sys.stderr, flush=True)
+        return 0
+
+    subs = load_subscriptions()
+    if not subs:
+        return 0
+    body = json.dumps(payload, ensure_ascii=False)
+
+    survivors = []
+    delivered = 0
+    for sub in subs:
+        try:
+            webpush(
+                subscription_info=sub,
+                data=body,
+                vapid_private_key=vapid_priv_pem,
+                vapid_claims={"sub": VAPID_CLAIMS_SUB},
+                ttl=300,
+            )
+            survivors.append(sub)
+            delivered += 1
+        except WebPushException as e:
+            # 410 Gone / 404 = subscription dead, drop it
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status in (404, 410):
+                continue
+            survivors.append(sub)  # transient error — keep for retry
+        except Exception as e:
+            print(f"[push] send error: {e}", file=sys.stderr, flush=True)
+            survivors.append(sub)
+
+    if len(survivors) != len(subs):
+        save_subscriptions(survivors)
+    return delivered
+
+
+# Track which sessions we've already pushed about to avoid spamming the same alert
+_last_needConfirm_sessions: set = set()
+
+
+def push_watcher_loop():
+    """Background thread: poll current.json, fire push when a session newly enters needConfirm."""
+    global _last_needConfirm_sessions
+    while True:
+        try:
+            time.sleep(1.0)
+            try:
+                with open(CURRENT_JSON) as f:
+                    cur = json.load(f)
+            except FileNotFoundError:
+                continue
+
+            now_needConfirm = set()
+            new_alerts = []
+            for s in cur.get("sessions", []):
+                if s.get("state") == "needConfirm":
+                    sid = s.get("id", "")
+                    now_needConfirm.add(sid)
+                    if sid and sid not in _last_needConfirm_sessions:
+                        new_alerts.append(s)
+
+            _last_needConfirm_sessions = now_needConfirm
+
+            for s in new_alerts:
+                proj = s.get("project", "unknown")
+                sid_short = s.get("id", "")[:8]
+                send_push_to_all({
+                    "title": "Claude — awaiting input",
+                    "body": f"{proj} · session {sid_short}",
+                    "tag": f"claude-needConfirm-{s.get('id', '')}",
+                    "requireInteraction": True,
+                    "url": "./",
+                })
+        except Exception as e:
+            print(f"[push-watcher] error: {e}", file=sys.stderr, flush=True)
+
+
+def start_push_watcher():
+    if not PUSH_AVAILABLE:
+        print("[push-watcher] disabled: pywebpush not installed", file=sys.stderr, flush=True)
+        return
+    if not os.path.exists(VAPID_KEYS_FILE):
+        print("[push-watcher] disabled: vapid_keys.json not found "
+              "(run scripts/generate-vapid.sh)", file=sys.stderr, flush=True)
+        return
+    t = threading.Thread(target=push_watcher_loop, daemon=True, name="push-watcher")
+    t.start()
+    print("[push-watcher] thread started", flush=True)
+
+
 def main():
+    start_push_watcher()
     server = ThreadingHTTPServer(("0.0.0.0", 8765), StatusHandler)
-    print(f"Claude Status Server V2.0 listening on 0.0.0.0:8765", flush=True)
+    print(f"claude-status server V2.1 listening on 0.0.0.0:8765 "
+          f"(push={'on' if PUSH_AVAILABLE else 'off'})", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

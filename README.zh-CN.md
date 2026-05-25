@@ -48,9 +48,20 @@
 
 ```bash
 git clone https://github.com/Zackzhang229152619/claude-status.git ~/.claude/status
+cd ~/.claude/status
 ```
 
-**2. 接入 Claude Code 的 hook**：把 [`examples/settings.json`](examples/settings.json) 合并到 `~/.claude/settings.json`。
+**2.（可选）装 venv + pywebpush** —— 只为开启 Web Push 推送时需要：
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install pywebpush
+bash scripts/generate-vapid.sh    # 生成 VAPID 密钥对（本地保留，绝不 commit）
+```
+
+跳过这步 server 也能跑，只是没推送通知。
+
+**3. 接入 Claude Code 的 hook**：把 [`examples/settings.json`](examples/settings.json) 合并到 `~/.claude/settings.json`。
 
 合并后简单验证：
 ```bash
@@ -73,6 +84,24 @@ launchctl load ~/Library/LaunchAgents/com.example.claude-status-server.plist
 ```
 
 server 日志在 `~/.claude/status/server.log`。
+
+## iPhone / iPad 推送通知（可选）
+
+看板本身就是 PWA。开启 Web Push 后，**iPhone 锁屏会直接弹推送**——每次某 Claude session 进入 `needConfirm` 状态（`AskUserQuestion` 弹出时），不管 Safari 是不是关了 / 手机在不在口袋都能收到。
+
+**前提**：iOS 16.4+、HTTPS 部署（nginx / Cloudflare Tunnel / Tailscale 等）、`scripts/generate-vapid.sh` 已生成 VAPID 密钥。
+
+**步骤**：
+
+1. iPhone Safari 打开看板 URL。
+2. 点底部分享按钮 → **添加到主屏幕** → 起个名（"Claude"）→ 添加。
+3. **从主屏 icon 启动 PWA**（iOS 只在 PWA 模式下允许推送）。
+4. 点右上角 🔔 铃铛按钮 → 弹"允许通知"时点 **允许**。
+5. 铃铛变金色 = 订阅成功。
+
+任何 Claude session 触发 `AskUserQuestion`，约 5 秒内 iPhone 锁屏弹推送。
+
+推送内容里的 `tag` 相同——同一个 needConfirm 重复触发不刷屏。直到你真正回复（参见上文 sticky 规则）。
 
 ---
 

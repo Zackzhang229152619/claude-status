@@ -10,7 +10,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Claude Status">
 <meta name="apple-touch-fullscreen" content="yes">
+<meta name="theme-color" content="#050609">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>Claude Status</title>
 <style>
   html, body {
@@ -78,6 +82,34 @@
   #fs-btn .fs-exit { display: none; }
   :fullscreen #fs-btn .fs-enter { display: none; }
   :fullscreen #fs-btn .fs-exit { display: block; }
+
+  /* Bell button — push notifications toggle */
+  #bell-btn {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0) + 14px);
+    right: calc(env(safe-area-inset-right, 0) + 122px);  /* 14 + 44 + 10 + 44 + 10 */
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    background: rgba(20,20,28,0.78);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border: 1px solid rgba(255,255,255,0.18);
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    z-index: 9000;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+    transition: transform 0.2s, background 0.2s, color 0.2s;
+    -webkit-tap-highlight-color: transparent;
+    font-size: 0;
+  }
+  #bell-btn:hover { transform: scale(1.05); background: rgba(35,35,48,0.85); }
+  #bell-btn:active { transform: scale(0.95); }
+  #bell-btn svg { width: 20px; height: 20px; }
+  #bell-btn.subscribed { color: #ffc66b; border-color: rgba(255,198,107,0.55); }
+  #bell-btn .bell-off { display: none; }
+  #bell-btn.subscribed .bell-on { display: none; }
+  #bell-btn.subscribed .bell-off { display: block; }
 
   #picker-sheet {
     position: fixed; inset: 0;
@@ -213,6 +245,18 @@
 
 <iframe id="theme-frame" title="Status"></iframe>
 
+<button id="bell-btn" title="开启通知 / 关闭通知" aria-label="Toggle push notifications">
+  <svg class="bell-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6 8a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/>
+    <path d="M10 19a2 2 0 1 0 4 0"/>
+  </svg>
+  <svg class="bell-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6 8a6 6 0 0 1 9.6-4.8M18 8c0 5 2 6 2 6H4s2-1 2-6"/>
+    <path d="M10 19a2 2 0 1 0 4 0"/>
+    <path d="M3 3l18 18"/>
+  </svg>
+</button>
+
 <button id="fs-btn" title="全屏 / 退出全屏" aria-label="Toggle fullscreen" onclick="(function(){if(document.fullscreenElement){document.exitFullscreen();}else{document.documentElement.requestFullscreen().catch(function(){});}})()">
   <svg class="fs-enter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
     <path d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4"/>
@@ -321,6 +365,95 @@
     if (card) loadTheme(card.dataset.theme);
     if (e.target.classList.contains('pk-close')) hidePicker();
   });
+
+  // ============================================================
+  // Web Push — service worker registration + subscribe toggle
+  // ============================================================
+  function urlB64ToUint8Array(b64) {
+    const padding = '='.repeat((4 - b64.length % 4) % 4);
+    const s = (b64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(s);
+    return Uint8Array.from(raw, c => c.charCodeAt(0));
+  }
+
+  async function getRegistration() {
+    if (!('serviceWorker' in navigator)) return null;
+    try {
+      let reg = await navigator.serviceWorker.getRegistration('/');
+      if (!reg) reg = await navigator.serviceWorker.register('sw.js', { scope: './' });
+      await navigator.serviceWorker.ready;
+      return reg;
+    } catch (e) {
+      console.warn('SW register failed', e);
+      return null;
+    }
+  }
+
+  async function refreshBellState() {
+    const bell = document.getElementById('bell-btn');
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+      bell.style.opacity = '0.4';
+      bell.title = '此浏览器不支持推送通知';
+      return;
+    }
+    try {
+      const reg = await navigator.serviceWorker.getRegistration('./');
+      const sub = reg ? await reg.pushManager.getSubscription() : null;
+      bell.classList.toggle('subscribed', !!sub && Notification.permission === 'granted');
+    } catch (e) { /* noop */ }
+  }
+
+  async function toggleSubscription() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      alert('此浏览器不支持推送通知。iOS 需把 dashboard 加到主屏作为 PWA。');
+      return;
+    }
+    const reg = await getRegistration();
+    if (!reg) {
+      alert('Service Worker 注册失败');
+      return;
+    }
+    let sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      // unsubscribe
+      try {
+        await sub.unsubscribe();
+      } catch (e) { /* noop */ }
+      refreshBellState();
+      return;
+    }
+    // request permission + subscribe
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') {
+      alert('通知权限未授予');
+      return;
+    }
+    try {
+      const r = await fetch('vapid-public-key', { cache: 'no-store' });
+      const { publicKey } = await r.json();
+      if (!publicKey) throw new Error('VAPID public key missing on server');
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlB64ToUint8Array(publicKey),
+      });
+      await fetch('push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sub.toJSON()),
+      });
+      refreshBellState();
+    } catch (e) {
+      console.error('subscribe failed', e);
+      alert('订阅失败：' + e.message);
+    }
+  }
+
+  document.getElementById('bell-btn').addEventListener('click', toggleSubscription);
+  // Auto-register SW on load (silent), refresh bell state
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
+  }
+  refreshBellState();
 
   // Keyboard: ⌘K / Ctrl+K opens picker, Esc closes
   document.addEventListener('keydown', (e) => {

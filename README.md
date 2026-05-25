@@ -47,9 +47,20 @@ It runs a local Python HTTP server (zero dependencies beyond stdlib + `jq`), dri
 
 ```bash
 git clone https://github.com/Zackzhang229152619/claude-status.git ~/.claude/status
+cd ~/.claude/status
 ```
 
-**2. Wire the hooks into Claude Code** by merging [`examples/settings.json`](examples/settings.json) into `~/.claude/settings.json`.
+**2. (Optional) Set up venv + pywebpush** — only needed for Web Push notifications:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install pywebpush
+bash scripts/generate-vapid.sh    # generates VAPID keys (kept local, never commit)
+```
+
+Without this step the server still runs, just without push notifications.
+
+**3. Wire the hooks into Claude Code** by merging [`examples/settings.json`](examples/settings.json) into `~/.claude/settings.json`.
 
 Quick check after merging:
 ```bash
@@ -57,13 +68,13 @@ echo '{"session_id":"test","hook_event_name":"PreToolUse"}' | bash ~/.claude/sta
 cat ~/.claude/status/current.json   # should now show {"global_state":"working", ...}
 ```
 
-**3. Start the server** (one-off test):
+**4. Start the server** (one-off test):
 ```bash
 bash ~/.claude/status/start_server.sh
 # then visit http://localhost:8765/ from any device on the LAN
 ```
 
-**4. Auto-start at login (recommended)** — copy and edit the LaunchAgent template:
+**5. Auto-start at login (recommended)** — copy and edit the LaunchAgent template:
 ```bash
 sed "s/YOUR_USERNAME/$USER/g" \
   ~/.claude/status/examples/com.example.claude-status-server.plist \
@@ -72,6 +83,24 @@ launchctl load ~/Library/LaunchAgents/com.example.claude-status-server.plist
 ```
 
 Server logs go to `~/.claude/status/server.log`.
+
+## iPhone / iPad push notifications (optional)
+
+The dashboard ships as a Progressive Web App. With Web Push enabled, your iPhone lock screen fires a notification every time a Claude session enters `needConfirm` (i.e. an `AskUserQuestion` shows up) — even when Safari is closed and your phone is in your pocket.
+
+**Requirements**: iOS 16.4+, HTTPS deployment (e.g. behind nginx/Cloudflare Tunnel/Tailscale), VAPID keys generated via `scripts/generate-vapid.sh`.
+
+**Steps**:
+
+1. Open the dashboard URL in iOS Safari.
+2. Tap the Share button → **Add to Home Screen** → name it ("Claude") → Add.
+3. Launch the app from the home screen icon (this is the only mode where iOS allows push).
+4. Tap the 🔔 bell button in the top-right → **Allow** when prompted for notifications.
+5. The bell turns gold once subscribed.
+
+Trigger an `AskUserQuestion` from any Claude session — within ~5 seconds the lock-screen notification fires.
+
+The notification will repeat with the same `tag` until you reply (sticky behavior — see [§ The sticky `needConfirm` rule](#the-sticky-needconfirm-rule)).
 
 ---
 
