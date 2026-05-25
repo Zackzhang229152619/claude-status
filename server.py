@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 """
-claude-status server V2.1
-
-Custom HTTP routes:
+Claude Status Server V2.0
+自定义 HTTP 路由：
   GET /                     -> dashboard.html
   GET /dashboard.html       -> dashboard.html
-  GET /current.json         -> served from disk, written by update.sh
-  GET /sessions_detail.json -> parses recent session transcripts on the fly
-  GET /token_stats.json     -> aggregates token usage (today / month / all-time)
-  GET /vapid-public-key     -> VAPID public key for Web Push subscription
-  POST /push/subscribe      -> register a Web Push subscription
-  POST /push/test           -> send a test push to all subscribers
-  *                         -> 404
+  GET /current.json         -> current.json (静态)
+  GET /sessions_detail.json -> 动态解析 transcript，返回中集数据
+  GET /token_stats.json     -> 动态统计 token 用量（今日/本月/累计）
+  其他                      -> 404
 """
 
 import json
@@ -29,17 +25,17 @@ PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
 CURRENT_JSON = os.path.join(BASE_DIR, "current.json")
 DASHBOARD_HTML = os.path.join(BASE_DIR, "dashboard.html")
 
-# Cache so we don't re-read disk on every poll
+# 缓存：避免每秒读文件 N 次
 _cache = {"data": None, "at": 0}
-CACHE_TTL = 1.0  # seconds
+CACHE_TTL = 1.0  # 秒
 
-# Token stats cache: 5s TTL
+# token 统计缓存：5 秒 TTL
 _token_cache = {"data": None, "at": 0}
-TOKEN_CACHE_TTL = 5.0  # seconds
+TOKEN_CACHE_TTL = 5.0  # 秒
 
 
 def empty_token_bucket() -> dict:
-    """Return an empty token-stats bucket."""
+    """返回一个空的 token 统计桶"""
     return {
         "input": 0,
         "output": 0,
@@ -50,7 +46,7 @@ def empty_token_bucket() -> dict:
 
 
 def add_usage_to_bucket(bucket: dict, usage: dict, model: str):
-    """Accumulate one usage record into the bucket (overall + per-model)."""
+    """把一条 usage 加到统计桶里"""
     bucket["input"]          += usage.get("input_tokens", 0)
     bucket["output"]         += usage.get("output_tokens", 0)
     bucket["cache_creation"] += usage.get("cache_creation_input_tokens", 0)
@@ -67,7 +63,10 @@ def add_usage_to_bucket(bucket: dict, usage: dict, model: str):
 
 
 def calculate_token_stats() -> dict:
-    """Walk all transcript .jsonl files and aggregate token usage into today / month / all-time buckets."""
+    """
+    遍历所有 transcript .jsonl，统计 token 用量。
+    分类：今日 / 本月 / 总累计。
+    """
     now_utc = datetime.now(timezone.utc)
     today_prefix = now_utc.strftime("%Y-%m-%d")
     month_prefix = now_utc.strftime("%Y-%m")
@@ -122,7 +121,7 @@ def calculate_token_stats() -> dict:
 
 
 def get_token_stats_cached() -> bytes:
-    """Token stats with 5-second cache."""
+    """带 5 秒缓存的 token 统计"""
     now = time.time()
     if _token_cache["data"] is None or now - _token_cache["at"] > TOKEN_CACHE_TTL:
         data = calculate_token_stats()
@@ -133,17 +132,17 @@ def get_token_stats_cached() -> bytes:
 
 
 def find_transcript(session_id: str) -> str | None:
-    """Find a transcript .jsonl file by session_id across all project dirs."""
+    """根据 session_id 在所有 project 目录里找 .jsonl 文件"""
     pattern = os.path.join(PROJECTS_DIR, "*", session_id + ".jsonl")
     matches = glob.glob(pattern)
     return matches[0] if matches else None
 
 
 def read_last_n_lines(path: str, n: int = 100) -> list[str]:
-    """Read the last N lines of a file without loading the whole thing."""
+    """读文件最后 n 行，避免全量加载大文件"""
     try:
         with open(path, "rb") as f:
-            # Read in chunks from the tail
+            # 从尾部读 chunk
             chunk_size = 8192
             f.seek(0, 2)
             file_size = f.tell()
@@ -161,7 +160,7 @@ def read_last_n_lines(path: str, n: int = 100) -> list[str]:
 
 
 def parse_transcript(session_id: str) -> dict:
-    """Parse a transcript and return current_tool / current_target / last_prompt."""
+    """解析 transcript，返回中集数据"""
     result = {
         "current_tool": None,
         "current_target": None,
@@ -177,7 +176,7 @@ def parse_transcript(session_id: str) -> dict:
     found_tool = False
     found_prompt = False
 
-    # Walk in reverse
+    # 反向遍历
     for raw in reversed(lines):
         raw = raw.strip()
         if not raw:
@@ -189,13 +188,13 @@ def parse_transcript(session_id: str) -> dict:
 
         t = d.get("type", "")
 
-        # Prefer the last-prompt event over reverse-scanning user messages (more reliable)
+        # 找最后一个 last-prompt 事件（比反向遍历 user 消息更准）
         if not found_prompt and t == "last-prompt":
             text = d.get("lastPrompt", "") or ""
             result["last_prompt"] = text[:80] if text else None
             found_prompt = True
 
-        # Find the last tool_use
+        # 找最后一个 tool_use
         if not found_tool and t == "assistant":
             msg = d.get("message", {})
             content = msg.get("content", [])
@@ -205,7 +204,7 @@ def parse_transcript(session_id: str) -> dict:
                         name = c.get("name", "")
                         inp = c.get("input", {})
                         result["current_tool"] = name
-                        # Extract target path
+                        # 取目标路径
                         if name in ("Edit", "Read", "Write", "MultiEdit", "NotebookEdit"):
                             fp = inp.get("file_path", "") or inp.get("notebook_path", "")
                             result["current_target"] = os.path.basename(fp) if fp else None
@@ -224,7 +223,7 @@ def parse_transcript(session_id: str) -> dict:
 
 
 def build_sessions_detail() -> list:
-"""Read sessions from current.json and parse each transcript."""
+    """读 current.json 里的 sessions，逐个解析 transcript"""
     try:
         with open(CURRENT_JSON) as f:
             cur = json.load(f)
@@ -250,7 +249,7 @@ def build_sessions_detail() -> list:
 
 
 def get_sessions_detail_cached() -> bytes:
-    """sessions_detail with 1-second cache."""
+    """带 1 秒缓存的 sessions_detail"""
     now = time.time()
     if _cache["data"] is None or now - _cache["at"] > CACHE_TTL:
         data = build_sessions_detail()
@@ -265,11 +264,11 @@ class StatusHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=BASE_DIR, **kwargs)
 
     def log_message(self, fmt, *args):
-        # Silence regular access logs; keep errors
+        # 静默常规日志，只记录错误
         pass
 
     def do_GET(self):
-        path = self.path.split("?")[0]  # strip query string
+        path = self.path.split("?")[0]  # 去掉查询参数
 
         # Deny sensitive files (private keys / subs / logs / backups)
         if any(part in path for part in ("vapid_private.pem", "vapid_keys.json",
@@ -297,7 +296,7 @@ class StatusHandler(SimpleHTTPRequestHandler):
         elif path == "/vapid-public-key":
             self._serve_dynamic_json(json.dumps({"publicKey": get_vapid_public_key()}).encode())
         else:
-            # Fallback: let SimpleHTTPRequestHandler serve any static file under BASE_DIR
+            # fallback：交给 SimpleHTTPRequestHandler serve BASE_DIR 下任意静态文件
             return super().do_GET()
 
     def do_POST(self):
@@ -322,8 +321,8 @@ class StatusHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(f'{{"ok":false,"error":"{e}"}}'.encode())
         elif path == "/push/test":
             count = send_push_to_all({
-                "title": "Claude Status — test",
-                "body": "If you see this, push works.",
+                "title": "Claude Status · 测试推送",
+                "body": "收到这条说明推送链路工作。",
                 "tag": "claude-test",
             })
             self._serve_dynamic_json(json.dumps({"ok": True, "delivered": count}).encode())
@@ -495,7 +494,7 @@ def push_watcher_loop():
                 proj = s.get("project", "unknown")
                 sid_short = s.get("id", "")[:8]
                 send_push_to_all({
-                    "title": "Claude — awaiting input",
+                    "title": "🔔 Claude 等你拍板",
                     "body": f"{proj} · session {sid_short}",
                     "tag": f"claude-needConfirm-{s.get('id', '')}",
                     "requireInteraction": True,
@@ -527,7 +526,7 @@ SYNC_TMP_DIR = "/tmp/claude_status_sync"
 
 
 def cloud_sync_loop():
-    """(legacy) Background thread that would rsync json files to cloud — disabled."""
+    """背景线程：每 CLOUD_SYNC_INTERVAL 秒把 3 个 json rsync 到云端"""
     os.makedirs(SYNC_TMP_DIR, exist_ok=True)
 
     ssh_cmd = (
