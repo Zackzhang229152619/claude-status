@@ -39,3 +39,4 @@ subscriptions.json
 # Python venv (created during install: python3 -m venv .venv)
 .venv/
 auth_secret.bin
+token_index.json

@@ -72,51 +72,149 @@ def add_usage_to_bucket(bucket: dict, usage: dict, model: str):
 
 
 def calculate_token_stats() -> dict:
-    """Walk all transcript .jsonl files and aggregate token usage into today / month / all-time buckets."""
+    """
+    遍历所有 transcript .jsonl，统计 token 用量。
+    Incremental aggregation via persistent token_index.json — see below.
+    """
+    return _calculate_token_stats_via_index()
+
+
+# ============================================================
+# Persistent token index — incremental scan of ~/.claude/projects/*.jsonl
+# ============================================================
+# token_index.json layout:
+#   {
+#     "version": 1,
+#     "files": {
+#       "<path>.jsonl": {
+#         "mtime": <int>, "size": <int>,
+#         "by_day": { "YYYY-MM-DD": {input, output, cache_creation, cache_read, by_model:{...}}, ... }
+#       }
+#     }
+#   }
+# today / month / all-time are aggregated from by_day buckets at API time.
+# First startup walks all jsonl once; subsequent calls only stat files and
+# re-parse the ones whose mtime or size changed.
+TOKEN_INDEX_FILE = os.path.join(BASE_DIR, "token_index.json")
+_token_index_lock = threading.Lock()
+
+
+def _empty_index() -> dict:
+    return {"version": 1, "files": {}}
+
+
+def _load_token_index() -> dict:
+    try:
+        with open(TOKEN_INDEX_FILE) as f:
+            d = json.load(f)
+        if d.get("version") == 1 and "files" in d:
+            return d
+    except Exception:
+        pass
+    return _empty_index()
+
+
+def _save_token_index(idx: dict):
+    tmp = TOKEN_INDEX_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(idx, f)
+    os.replace(tmp, TOKEN_INDEX_FILE)
+
+
+def _scan_file_to_by_day(filepath: str) -> dict:
+    by_day: dict = {}
+    try:
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            for raw in f:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    d = json.loads(raw)
+                except Exception:
+                    continue
+                if d.get("type") != "assistant":
+                    continue
+                msg = d.get("message", {})
+                usage = msg.get("usage")
+                if not usage:
+                    continue
+                model = msg.get("model", "unknown")
+                ts = d.get("timestamp", "")
+                if len(ts) < 10:
+                    continue
+                day_key = ts[:10]
+                if day_key not in by_day:
+                    by_day[day_key] = empty_token_bucket()
+                add_usage_to_bucket(by_day[day_key], usage, model)
+    except Exception:
+        pass
+    return by_day
+
+
+def _update_token_index() -> dict:
+    """Re-scan only files whose mtime/size changed since last index. Persist + return."""
+    with _token_index_lock:
+        idx = _load_token_index()
+        pattern = os.path.join(PROJECTS_DIR, "**", "*.jsonl")
+        current_files = set(glob.glob(pattern, recursive=True))
+        known_files = set(idx["files"].keys())
+
+        changed = False
+
+        for fpath in known_files - current_files:
+            del idx["files"][fpath]
+            changed = True
+
+        for fpath in current_files:
+            try:
+                st = os.stat(fpath)
+            except Exception:
+                continue
+            mtime, size = int(st.st_mtime), st.st_size
+            entry = idx["files"].get(fpath)
+            if entry and entry.get("mtime") == mtime and entry.get("size") == size:
+                continue
+            by_day = _scan_file_to_by_day(fpath)
+            idx["files"][fpath] = {"mtime": mtime, "size": size, "by_day": by_day}
+            changed = True
+
+        if changed:
+            _save_token_index(idx)
+        return idx
+
+
+def _merge_into(dst: dict, src: dict):
+    dst["input"]          += src.get("input", 0)
+    dst["output"]         += src.get("output", 0)
+    dst["cache_creation"] += src.get("cache_creation", 0)
+    dst["cache_read"]     += src.get("cache_read", 0)
+    for model, stats in (src.get("by_model") or {}).items():
+        if model not in dst["by_model"]:
+            dst["by_model"][model] = {"input": 0, "output": 0, "cache_creation": 0, "cache_read": 0}
+        for k in ("input", "output", "cache_creation", "cache_read"):
+            dst["by_model"][model][k] += stats.get(k, 0)
+
+
+def _calculate_token_stats_via_index() -> dict:
     now_utc = datetime.now(timezone.utc)
     today_prefix = now_utc.strftime("%Y-%m-%d")
     month_prefix = now_utc.strftime("%Y-%m")
+
+    idx = _update_token_index()
 
     total = empty_token_bucket()
     today = empty_token_bucket()
     month = empty_token_bucket()
 
-    pattern = os.path.join(PROJECTS_DIR, "*", "*.jsonl")
-    files = glob.glob(pattern)
-
-    for filepath in files:
-        try:
-            with open(filepath, "r", encoding="utf-8", errors="replace") as f:
-                for raw in f:
-                    raw = raw.strip()
-                    if not raw:
-                        continue
-                    try:
-                        d = json.loads(raw)
-                    except Exception:
-                        continue
-
-                    if d.get("type") != "assistant":
-                        continue
-
-                    msg = d.get("message", {})
-                    usage = msg.get("usage")
-                    if not usage:
-                        continue
-
-                    model = msg.get("model", "unknown")
-                    ts = d.get("timestamp", "")
-
-                    add_usage_to_bucket(total, usage, model)
-
-                    if ts.startswith(month_prefix):
-                        add_usage_to_bucket(month, usage, model)
-
-                    if ts.startswith(today_prefix):
-                        add_usage_to_bucket(today, usage, model)
-
-        except Exception:
-            continue
+    for entry in idx["files"].values():
+        by_day = entry.get("by_day", {})
+        for day_key, bucket in by_day.items():
+            _merge_into(total, bucket)
+            if day_key.startswith(month_prefix):
+                _merge_into(month, bucket)
+            if day_key == today_prefix:
+                _merge_into(today, bucket)
 
     return {
         "today": today,
@@ -126,15 +224,38 @@ def calculate_token_stats() -> dict:
     }
 
 
+_empty_token_response = {
+    "today": empty_token_bucket(),
+    "month": empty_token_bucket(),
+    "total": empty_token_bucket(),
+    "last_updated": "",
+}
+
+
 def get_token_stats_cached() -> bytes:
-    """Token stats with 5-second cache."""
-    now = time.time()
-    if _token_cache["data"] is None or now - _token_cache["at"] > TOKEN_CACHE_TTL:
-        data = calculate_token_stats()
-        body = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
-        _token_cache["data"] = body
-        _token_cache["at"] = now
-    return _token_cache["data"]
+    """Return in-memory token stats; empty until the background warmup thread fills it."""
+    data = _token_cache["data"]
+    if data is None:
+        return json.dumps(_empty_token_response, ensure_ascii=False, indent=2).encode("utf-8")
+    return data
+
+
+def token_warmup_loop():
+    """Background thread: incremental scan + refresh in-memory cache every TOKEN_CACHE_TTL seconds."""
+    while True:
+        try:
+            data = calculate_token_stats()
+            _token_cache["data"] = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+            _token_cache["at"] = time.time()
+        except Exception as e:
+            print(f"[token-warmup] error: {e}", file=sys.stderr, flush=True)
+        time.sleep(TOKEN_CACHE_TTL)
+
+
+def start_token_warmup():
+    t = threading.Thread(target=token_warmup_loop, daemon=True, name="token-warmup")
+    t.start()
+    print(f"[token-warmup] thread started (refresh every {TOKEN_CACHE_TTL}s)", flush=True)
 
 
 def find_transcript(session_id: str) -> str | None:
@@ -700,6 +821,7 @@ def start_cloud_sync_thread():
 
 def main():
     start_cloud_sync_thread()
+    start_token_warmup()
     start_push_watcher()
     server = ThreadingHTTPServer(("0.0.0.0", 8765), StatusHandler)
     print(f"Claude Status Server V2.1 listening on 0.0.0.0:8765 (push={'on' if PUSH_AVAILABLE else 'off'})", flush=True)
