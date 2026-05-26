@@ -415,7 +415,7 @@ class StatusHandler(SimpleHTTPRequestHandler):
 AUTH_SECRET_FILE = os.path.join(BASE_DIR, "auth_secret.bin")
 AUTH_COOKIE_NAME = "claude_auth"
 AUTH_COOKIE_MAX_AGE = 365 * 24 * 3600  # 1 year
-AUTH_TOKEN_PREFIX = "229152619+"  # token = AUTH_TOKEN_PREFIX + today's MMDD
+AUTH_TOKEN_PREFIX = "229152619"  # token = AUTH_TOKEN_PREFIX + today's MMDD (no separator)
 
 
 def _ensure_auth_secret() -> bytes:

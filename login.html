@@ -98,23 +98,18 @@
   <div class="sub">输入令牌登录,365 天免输</div>
 
   <form method="GET" action="auth/login">
-    <input type="text"
+    <input type="password"
            name="token"
            placeholder="令牌"
            autofocus
-           autocomplete="off"
+           autocomplete="current-password"
            autocapitalize="off"
            autocorrect="off"
            spellcheck="false">
     <button type="submit">进入</button>
   </form>
 
-  <div class="err" id="err">令牌错误,请检查格式后重试</div>
-
-  <div class="hint">
-    令牌格式: <code>229152619+MMDD</code>(当天日期 4 位)<br>
-    例如 5 月 26 日: <code>229152619+0526</code>
-  </div>
+  <div class="err" id="err">令牌错误,请检查后重试</div>
 </div>
 
 <script>
