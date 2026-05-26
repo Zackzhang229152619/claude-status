@@ -34,11 +34,13 @@ DASHBOARD_HTML = os.path.join(BASE_DIR, "dashboard.html")
 
 # Cache so we don't re-read disk on every poll
 _cache = {"data": None, "at": 0}
-CACHE_TTL = 1.0  # seconds
+CACHE_TTL = 3.0  # seconds — sessions_detail parses last 150 lines of recent transcripts
 
-# Token stats cache: 5s TTL
+# Token stats cache: 5 minutes
+# (calculate_token_stats walks ~1900 .jsonl files / 366 MB and parses every line —
+# each cache miss is expensive, so refresh slowly; token totals don't need sub-minute accuracy)
 _token_cache = {"data": None, "at": 0}
-TOKEN_CACHE_TTL = 5.0  # seconds
+TOKEN_CACHE_TTL = 300.0  # seconds
 
 
 def empty_token_bucket() -> dict:
