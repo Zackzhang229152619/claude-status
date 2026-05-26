@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#050609">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta http-equiv="Cache-Control" content="no-store">
+<title>Claude Status · 登录</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; min-height: 100vh;
+    background: #050609;
+    color: #e9f0ff;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .wrap {
+    width: 100%; max-width: 420px;
+    padding: 32px 28px;
+  }
+  h1 {
+    margin: 0 0 8px;
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .sub {
+    margin: 0 0 32px;
+    color: #7a8aa0;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+  }
+  form { display: flex; flex-direction: column; gap: 12px; }
+  input[type="text"] {
+    width: 100%;
+    padding: 16px 18px;
+    font-size: 16px;
+    font-family: ui-monospace, "JetBrains Mono", "SF Mono", monospace;
+    border-radius: 14px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(20,24,32,0.7);
+    color: #fff;
+    outline: none;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  input[type="text"]:focus {
+    border-color: #2f6fed;
+    background: rgba(30,38,52,0.85);
+  }
+  button {
+    padding: 16px;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    border-radius: 14px;
+    border: none;
+    background: linear-gradient(135deg, #2f6fed, #3b82ff);
+    color: #fff;
+    cursor: pointer;
+    transition: transform 0.15s, opacity 0.2s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button:active { transform: scale(0.98); opacity: 0.9; }
+  .hint {
+    margin-top: 20px;
+    color: #7a8aa0;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .hint code {
+    background: rgba(255,255,255,0.06);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+  }
+  .err {
+    display: none;
+    margin-top: 12px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: rgba(255,80,90,0.12);
+    border: 1px solid rgba(255,80,90,0.4);
+    color: #ff8a92;
+    font-size: 13px;
+  }
+  .err.show { display: block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Claude Status</h1>
+  <div class="sub">输入令牌登录,365 天免输</div>
+
+  <form method="GET" action="auth/login">
+    <input type="text"
+           name="token"
+           placeholder="令牌"
+           autofocus
+           autocomplete="off"
+           autocapitalize="off"
+           autocorrect="off"
+           spellcheck="false">
+    <button type="submit">进入</button>
+  </form>
+
+  <div class="err" id="err">令牌错误,请检查格式后重试</div>
+
+  <div class="hint">
+    令牌格式: <code>229152619+MMDD</code>(当天日期 4 位)<br>
+    例如 5 月 26 日: <code>229152619+0526</code>
+  </div>
+</div>
+
+<script>
+  // Show error banner if redirected back with ?err=1
+  if (new URLSearchParams(location.search).get('err')) {
+    document.getElementById('err').classList.add('show');
+  }
+</script>
+</body>
+</html>

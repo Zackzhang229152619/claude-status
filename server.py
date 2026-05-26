@@ -1,18 +1,25 @@
 #!/usr/bin/env python3
 """
-Claude Status Server V2.0
-自定义 HTTP 路由：
+claude-status server V2.1
+
+Custom HTTP routes:
   GET /                     -> dashboard.html
   GET /dashboard.html       -> dashboard.html
-  GET /current.json         -> current.json (静态)
-  GET /sessions_detail.json -> 动态解析 transcript，返回中集数据
-  GET /token_stats.json     -> 动态统计 token 用量（今日/本月/累计）
-  其他                      -> 404
+  GET /current.json         -> served from disk, written by update.sh
+  GET /sessions_detail.json -> parses recent session transcripts on the fly
+  GET /token_stats.json     -> aggregates token usage (today / month / all-time)
+  GET /vapid-public-key     -> VAPID public key for Web Push subscription
+  POST /push/subscribe      -> register a Web Push subscription
+  POST /push/test           -> send a test push to all subscribers
+  *                         -> 404
 """
 
 import json
 import os
 import glob
+import hmac
+import hashlib
+import secrets
 import sys
 import subprocess
 import threading
@@ -25,17 +32,17 @@ PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
 CURRENT_JSON = os.path.join(BASE_DIR, "current.json")
 DASHBOARD_HTML = os.path.join(BASE_DIR, "dashboard.html")
 
-# 缓存：避免每秒读文件 N 次
+# Cache so we don't re-read disk on every poll
 _cache = {"data": None, "at": 0}
-CACHE_TTL = 1.0  # 秒
+CACHE_TTL = 1.0  # seconds
 
-# token 统计缓存：5 秒 TTL
+# Token stats cache: 5s TTL
 _token_cache = {"data": None, "at": 0}
-TOKEN_CACHE_TTL = 5.0  # 秒
+TOKEN_CACHE_TTL = 5.0  # seconds
 
 
 def empty_token_bucket() -> dict:
-    """返回一个空的 token 统计桶"""
+    """Return an empty token-stats bucket."""
     return {
         "input": 0,
         "output": 0,
@@ -46,7 +53,7 @@ def empty_token_bucket() -> dict:
 
 
 def add_usage_to_bucket(bucket: dict, usage: dict, model: str):
-    """把一条 usage 加到统计桶里"""
+    """Accumulate one usage record into the bucket (overall + per-model)."""
     bucket["input"]          += usage.get("input_tokens", 0)
     bucket["output"]         += usage.get("output_tokens", 0)
     bucket["cache_creation"] += usage.get("cache_creation_input_tokens", 0)
@@ -63,10 +70,7 @@ def add_usage_to_bucket(bucket: dict, usage: dict, model: str):
 
 
 def calculate_token_stats() -> dict:
-    """
-    遍历所有 transcript .jsonl，统计 token 用量。
-    分类：今日 / 本月 / 总累计。
-    """
+    """Walk all transcript .jsonl files and aggregate token usage into today / month / all-time buckets."""
     now_utc = datetime.now(timezone.utc)
     today_prefix = now_utc.strftime("%Y-%m-%d")
     month_prefix = now_utc.strftime("%Y-%m")
@@ -121,7 +125,7 @@ def calculate_token_stats() -> dict:
 
 
 def get_token_stats_cached() -> bytes:
-    """带 5 秒缓存的 token 统计"""
+    """Token stats with 5-second cache."""
     now = time.time()
     if _token_cache["data"] is None or now - _token_cache["at"] > TOKEN_CACHE_TTL:
         data = calculate_token_stats()
@@ -132,17 +136,17 @@ def get_token_stats_cached() -> bytes:
 
 
 def find_transcript(session_id: str) -> str | None:
-    """根据 session_id 在所有 project 目录里找 .jsonl 文件"""
+    """Find a transcript .jsonl file by session_id across all project dirs."""
     pattern = os.path.join(PROJECTS_DIR, "*", session_id + ".jsonl")
     matches = glob.glob(pattern)
     return matches[0] if matches else None
 
 
 def read_last_n_lines(path: str, n: int = 100) -> list[str]:
-    """读文件最后 n 行，避免全量加载大文件"""
+    """Read the last N lines of a file without loading the whole thing."""
     try:
         with open(path, "rb") as f:
-            # 从尾部读 chunk
+            # Read in chunks from the tail
             chunk_size = 8192
             f.seek(0, 2)
             file_size = f.tell()
@@ -160,7 +164,7 @@ def read_last_n_lines(path: str, n: int = 100) -> list[str]:
 
 
 def parse_transcript(session_id: str) -> dict:
-    """解析 transcript，返回中集数据"""
+    """Parse a transcript and return current_tool / current_target / last_prompt."""
     result = {
         "current_tool": None,
         "current_target": None,
@@ -176,7 +180,7 @@ def parse_transcript(session_id: str) -> dict:
     found_tool = False
     found_prompt = False
 
-    # 反向遍历
+    # Walk in reverse
     for raw in reversed(lines):
         raw = raw.strip()
         if not raw:
@@ -188,13 +192,13 @@ def parse_transcript(session_id: str) -> dict:
 
         t = d.get("type", "")
 
-        # 找最后一个 last-prompt 事件（比反向遍历 user 消息更准）
+        # Prefer the last-prompt event over reverse-scanning user messages (more reliable)
         if not found_prompt and t == "last-prompt":
             text = d.get("lastPrompt", "") or ""
             result["last_prompt"] = text[:80] if text else None
             found_prompt = True
 
-        # 找最后一个 tool_use
+        # Find the last tool_use
         if not found_tool and t == "assistant":
             msg = d.get("message", {})
             content = msg.get("content", [])
@@ -204,7 +208,7 @@ def parse_transcript(session_id: str) -> dict:
                         name = c.get("name", "")
                         inp = c.get("input", {})
                         result["current_tool"] = name
-                        # 取目标路径
+                        # Extract target path
                         if name in ("Edit", "Read", "Write", "MultiEdit", "NotebookEdit"):
                             fp = inp.get("file_path", "") or inp.get("notebook_path", "")
                             result["current_target"] = os.path.basename(fp) if fp else None
@@ -223,7 +227,7 @@ def parse_transcript(session_id: str) -> dict:
 
 
 def build_sessions_detail() -> list:
-    """读 current.json 里的 sessions，逐个解析 transcript"""
+    """Read sessions from current.json and parse each transcript."""
     try:
         with open(CURRENT_JSON) as f:
             cur = json.load(f)
@@ -249,7 +253,7 @@ def build_sessions_detail() -> list:
 
 
 def get_sessions_detail_cached() -> bytes:
-    """带 1 秒缓存的 sessions_detail"""
+    """sessions_detail with 1-second cache."""
     now = time.time()
     if _cache["data"] is None or now - _cache["at"] > CACHE_TTL:
         data = build_sessions_detail()
@@ -264,19 +268,60 @@ class StatusHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=BASE_DIR, **kwargs)
 
     def log_message(self, fmt, *args):
-        # 静默常规日志，只记录错误
+        # Silence regular access logs; keep errors
         pass
 
     def do_GET(self):
-        path = self.path.split("?")[0]  # 去掉查询参数
+        path = self.path.split("?")[0]  # strip query string
 
-        # Deny sensitive files (private keys / subs / logs / backups)
+        # Deny sensitive files (private keys / subs / logs / backups / venv / secret)
         if any(part in path for part in ("vapid_private.pem", "vapid_keys.json",
                                          "subscriptions.json", "server.log",
+                                         "auth_secret.bin",
                                          "/backups/", "/.venv/", "/.lock")):
             self.send_response(403)
             self.end_headers()
             self.wfile.write(b"403 Forbidden")
+            return
+
+        # ---------- Auth endpoints (always reachable) ----------
+        if path == "/auth/check":
+            # Used by nginx auth_request — returns 200 if cookie is valid, else 401
+            if check_cookie_valid(self.headers.get("Cookie", "")):
+                self.send_response(200)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            else:
+                self.send_response(401)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            return
+
+        if path == "/auth/login":
+            # Verify URL token and set the auth cookie
+            query = self.path.split("?", 1)[1] if "?" in self.path else ""
+            token = ""
+            for kv in query.split("&"):
+                if kv.startswith("token="):
+                    from urllib.parse import unquote_plus
+                    token = unquote_plus(kv[len("token="):])
+                    break
+            if not _check_url_token(token):
+                # Bad token — redirect back to login page with error flag
+                self.send_response(302)
+                self.send_header("Location", "../login.html?err=1")
+                self.end_headers()
+                return
+            # Token OK — set cookie and redirect to dashboard (parent of /auth/)
+            cookie_val = _expected_cookie_value()
+            self.send_response(302)
+            self.send_header("Location", "../")
+            self.send_header(
+                "Set-Cookie",
+                f"{AUTH_COOKIE_NAME}={cookie_val}; Max-Age={AUTH_COOKIE_MAX_AGE}; "
+                f"Path=/; HttpOnly; SameSite=Lax"
+            )
+            self.end_headers()
             return
 
         if path == "/":
@@ -296,7 +341,7 @@ class StatusHandler(SimpleHTTPRequestHandler):
         elif path == "/vapid-public-key":
             self._serve_dynamic_json(json.dumps({"publicKey": get_vapid_public_key()}).encode())
         else:
-            # fallback：交给 SimpleHTTPRequestHandler serve BASE_DIR 下任意静态文件
+            # fallback: let SimpleHTTPRequestHandler serve any static file under BASE_DIR
             return super().do_GET()
 
     def do_POST(self):
@@ -364,6 +409,59 @@ class StatusHandler(SimpleHTTPRequestHandler):
 # ============================================================
 # Web Push (PWA notifications)
 # ============================================================
+# ============================================================
+# Cookie-based auth (magic-link token + persistent cookie)
+# ============================================================
+AUTH_SECRET_FILE = os.path.join(BASE_DIR, "auth_secret.bin")
+AUTH_COOKIE_NAME = "claude_auth"
+AUTH_COOKIE_MAX_AGE = 365 * 24 * 3600  # 1 year
+AUTH_TOKEN_PREFIX = "229152619+"  # token = AUTH_TOKEN_PREFIX + today's MMDD
+
+
+def _ensure_auth_secret() -> bytes:
+    """Generate or load a 32-byte secret used to sign auth cookies."""
+    if not os.path.exists(AUTH_SECRET_FILE):
+        with open(AUTH_SECRET_FILE, "wb") as f:
+            f.write(secrets.token_bytes(32))
+        os.chmod(AUTH_SECRET_FILE, 0o600)
+    with open(AUTH_SECRET_FILE, "rb") as f:
+        return f.read()
+
+
+def _expected_cookie_value() -> str:
+    """HMAC-SHA256 of a fixed message (single-user, no session state needed)."""
+    secret = _ensure_auth_secret()
+    return hmac.new(secret, b"claude-status-auth-v1", hashlib.sha256).hexdigest()
+
+
+def _check_url_token(token: str) -> bool:
+    """Token format: AUTH_TOKEN_PREFIX + today's MMDD (e.g. '229152619+0526')."""
+    if not token:
+        return False
+    today_mmdd = datetime.now().strftime("%m%d")
+    expected = f"{AUTH_TOKEN_PREFIX}{today_mmdd}"
+    return hmac.compare_digest(token, expected)
+
+
+def _parse_cookie(cookie_header: str, name: str) -> str:
+    """Extract a cookie value from a 'Cookie: a=1; b=2' header."""
+    if not cookie_header:
+        return ""
+    for part in cookie_header.split(";"):
+        part = part.strip()
+        if part.startswith(name + "="):
+            return part[len(name) + 1:]
+    return ""
+
+
+def check_cookie_valid(cookie_header: str) -> bool:
+    """True if the request's Cookie header carries a valid claude_auth cookie."""
+    val = _parse_cookie(cookie_header, AUTH_COOKIE_NAME)
+    if not val:
+        return False
+    return hmac.compare_digest(val, _expected_cookie_value())
+
+
 VAPID_KEYS_FILE = os.path.join(BASE_DIR, "vapid_keys.json")
 VAPID_PRIVATE_PEM = os.path.join(BASE_DIR, "vapid_private.pem")
 SUBSCRIPTIONS_FILE = os.path.join(BASE_DIR, "subscriptions.json")
@@ -494,7 +592,7 @@ def push_watcher_loop():
                 proj = s.get("project", "unknown")
                 sid_short = s.get("id", "")[:8]
                 send_push_to_all({
-                    "title": "🔔 Claude 等你拍板",
+                    "title": "Claude — awaiting input",
                     "body": f"{proj} · session {sid_short}",
                     "tag": f"claude-needConfirm-{s.get('id', '')}",
                     "requireInteraction": True,
@@ -526,7 +624,7 @@ SYNC_TMP_DIR = "/tmp/claude_status_sync"
 
 
 def cloud_sync_loop():
-    """背景线程：每 CLOUD_SYNC_INTERVAL 秒把 3 个 json rsync 到云端"""
+    """(legacy) Background thread that would rsync json files to cloud — disabled."""
     os.makedirs(SYNC_TMP_DIR, exist_ok=True)
 
     ssh_cmd = (
